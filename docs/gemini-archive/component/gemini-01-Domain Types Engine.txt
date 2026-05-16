@@ -1,0 +1,9 @@
+Context: I am building a lightweight process execution app called "FlightManual". It runs templates as active ephemeral instances.
+Task: Write a strictly-typed TypeScript file for 'src/core/types.ts'.
+Requirements:
+- Define a 'Step' interface: id (string), text (string), isCompleted (boolean), isLocked (boolean), dependsOnStepId (string, optional).
+- Define a 'BranchCondition' interface: allows a step to contain multiple choices. Each choice maps to an array of conditional 'Step' objects.
+- Define a 'Template' interface: id (string), name (string), tags (string[]), baseSteps: Step[], branchingStep?: { question: string; options: { [key: string]: Step[] } }.
+- Define a 'RunInstance' interface: id (string), templateId (string), startedAt (number), currentSteps: Step[], isFinished (boolean).
+- Define a 'RunLog' interface: templateId (string), timestamp (number), durationMs (number).
+- No external libraries. Export all types clearly.

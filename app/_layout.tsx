@@ -2,6 +2,8 @@ import '@/global.css';
 
 import { ActionSheetProvider } from '@expo/react-native-action-sheet';
 
+import { StoreProvider } from '../src/core/store';
+
 import { ThemeProvider as NavThemeProvider } from '@react-navigation/native';
 import * as Device from 'expo-device';
 import { Link, Stack } from 'expo-router';
@@ -31,19 +33,19 @@ export default function RootLayout() {
         key={`root-status-bar-${isDarkColorScheme ? 'light' : 'dark'}`}
         style={isDarkColorScheme ? 'light' : 'dark'}
       />
-      {/* WRAP YOUR APP WITH ANY ADDITIONAL PROVIDERS HERE */}
-      {/* <ExampleProvider> */}
       <GestureHandlerRootView style={{ flex: 1 }}>
-        <ActionSheetProvider>
-          <NavThemeProvider value={NAV_THEME[colorScheme]}>
-            <Stack>
-              <Stack.Screen name="index" options={INDEX_OPTIONS} />
-              <Stack.Screen name="modal" options={MODAL_OPTIONS} />
-            </Stack>
-          </NavThemeProvider>
-        </ActionSheetProvider>
+        <StoreProvider>
+          <ActionSheetProvider>
+            <NavThemeProvider value={NAV_THEME[colorScheme]}>
+              <Stack>
+                <Stack.Screen name="index" options={INDEX_OPTIONS} />
+                <Stack.Screen name="flight-deck" options={FLIGHT_DECK_OPTIONS} />
+                <Stack.Screen name="modal" options={MODAL_OPTIONS} />
+              </Stack>
+            </NavThemeProvider>
+          </ActionSheetProvider>
+        </StoreProvider>
       </GestureHandlerRootView>
-      {/* </ExampleProvider> */}
     </>
   );
 }
@@ -51,7 +53,7 @@ export default function RootLayout() {
 const INDEX_OPTIONS = {
   headerLargeTitle: true,
   headerTransparent: isIos26,
-  title: 'NativewindUI',
+  title: 'FlightManual',
   headerRight: () => <SettingsIcon />,
 } as const;
 
@@ -64,6 +66,11 @@ function SettingsIcon() {
     </Link>
   );
 }
+
+const FLIGHT_DECK_OPTIONS = {
+  title: 'Flight Deck',
+  headerBackTitle: 'Back',
+} as const;
 
 const MODAL_OPTIONS = {
   presentation: 'modal',

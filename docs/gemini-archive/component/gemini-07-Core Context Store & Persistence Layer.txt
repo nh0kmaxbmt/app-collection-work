@@ -1,0 +1,12 @@
+Context: React Native Context State management engine with asynchronous persistent storage for FlightManual.
+Task: Write 'src/core/store.ts' using TypeScript and '@react-native-async-storage/async-storage'.
+Requirements:
+- Create a 'FlightManualProvider' and custom hook 'useFlightManual()'.
+- Manage three local state variables initialized from AsyncStorage: 'templates', 'activeRun', and 'historyLogs'.
+- Inside the initialization hook, check if storage is empty. If it is, seed the storage with the exact comprehensive 'Gym Session Prep' master template structure and the 'run_logs' dummy performance history provided in the blueprint documentation.
+- Implement and expose the following concrete atomic functions:
+  1. startRun(templateId: string): Instantiates a RunInstance object, records the start timestamp, updates activeRun state, and saves to storage.
+  2. selectBranch(optionKey: string): Dynamic injector logic. Grabs conditional steps from the template's branching configuration and inserts them cleanly into activeRun.currentSteps directly after the prerequisite dependency check step.
+  3. toggleStep(stepId: string): Mutates isCompleted state. Crucial logic: Scan currentSteps sequentially; if stepId is marked completed, immediately find dependent steps matching its ID and flip their isLocked flags to false.
+  4. completeRun(): Captures execution delta duration, builds an append-only RunLog entry, pushes to historyLogs, clears activeRun back to null, and updates storage.
+- Wrap all async mutations in try/catch blocks with defensive error log statements.

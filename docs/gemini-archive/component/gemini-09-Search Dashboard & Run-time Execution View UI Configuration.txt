@@ -1,0 +1,7 @@
+Context: Expo Router layouts styled with NativeWind Tailwind utility layers.
+Task: Build out 'app/index.tsx', 'app/flight-deck.tsx', and 'src/components/StepItem.tsx'.
+Requirements:
+- Map components to the Data Interaction Lifecycle. 
+- 'app/index.tsx': Renders a full screen Raycast-style spotlight input box. Uses engine functions to list weighted choices when empty. Hitting entry calls startRun() and routes cleanly to flight-deck.
+- 'app/flight-deck.tsx': Subscribes directly to activeRun state. If a choice step is present and unselected, populates full screen touch buttons calling selectBranch(). Renders sequential items via StepItem. Renders a fixed progress metrics bar at the bottom with a clear completion trigger.
+- 'src/components/StepItem.tsx': Uses NativeWind styling. Disabled items must use custom opacity/blur classes. Active steps utilize large mobile tap tracking frames.

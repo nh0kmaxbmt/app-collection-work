@@ -1,0 +1,8 @@
+Context: Tailwind CSS + React + TypeScript.
+Task: Write the 'CommandPalette.tsx' component.
+Requirements:
+- Render a clean, minimalist full-width search input that automatically autofocuses on mount.
+- Display a list of suggested templates filtered by search text.
+- If search input is empty, display the templates sorted by the time-weighted engine.
+- Layout must resemble macOS Spotlight or Raycast: clean borders, crisp typography, subtle keyboard-friendly UI cues.
+- Clicking a template or hitting Enter triggers 'startRun(templateId)'.

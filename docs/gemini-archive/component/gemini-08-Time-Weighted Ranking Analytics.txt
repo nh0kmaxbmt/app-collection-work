@@ -1,0 +1,10 @@
+Context: Algorithmic utility calculation layer for habit matching.
+Task: Write a highly performant utility file 'src/core/engine.ts' using TypeScript.
+Requirements:
+- Implement a pure function: 'getWeightedTemplates(templates: Template[], logs: RunLog[]): Template[]'.
+- Scoring Logic:
+  1. Get the current operational system hour (0-23).
+  2. Filter history logs to examine entries for matching templates.
+  3. Look at past execution timestamps. If an historical log falls within a +/- 2-hour window of the current system hour, apply a weighted score calculation step to that template template entry.
+  4. Sort the master array output descending based on calculated historical match frequency scores.
+- Ensure proper handling of fallback defaults if historyLogs array length is equal to zero.

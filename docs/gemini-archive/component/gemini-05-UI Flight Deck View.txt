@@ -1,0 +1,8 @@
+Context: The core execution environment UI.
+Task: Write 'FlightDeck.tsx' and 'StepItem.tsx' as cohesive Tailwind-styled components.
+Requirements:
+- If 'activeRun' has a branching option unchosen, render a clean, distraction-free radio/button selector for the branch options (e.g., "Select Routine: Legs / Core").
+- Render steps sequentially. Locked steps must look dimmed, blurred, or unclickable.
+- Active steps must be large, high-contrast touch targets optimized for mobile use. 
+- Use subtle animations or clear state transitions when a step is checked off and the next step unlocks.
+- Display a fixed bottom bar containing a 'ProgressBar' and a prominent 'Complete Run / Reset' button that triggers 'completeRun()' once all steps are checked.

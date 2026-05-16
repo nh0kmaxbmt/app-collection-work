@@ -1,0 +1,10 @@
+Context: Building an ephemeral, high-speed checklist application called FlightManual using React Native/Expo.
+Task: Generate the complete 'src/core/types.ts' file.
+Requirements:
+- Define strict TypeScript types mapping exactly to the schema properties of:
+  1. Step (id, text, isCompleted, isLocked, dependsOnStepId)
+  2. BranchingStep (question, options: Record<string, Step[]>)
+  3. Template (id, name, tags, baseSteps, branchingStep)
+  4. RunInstance (id, templateId, startedAt, currentSteps, selectedBranch, isFinished)
+  5. RunLog (templateId, timestamp, durationMs)
+- Export all interfaces. Do not use shortcuts or any external libraries.

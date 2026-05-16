@@ -1,0 +1,6 @@
+Context: Logic layer for calculating time-weighted suggestions.
+Task: Write 'src/core/engine.ts'.
+Requirements:
+- Write a pure function 'getWeightedTemplates(templates: Template[], logs: RunLog[]): Template[]'.
+- Logic: Analyze the historyLogs. Look at the last 5-10 logs. Compare the current hour (e.g., 5 PM) with the timestamps of past logs. If a template has been run frequently within a +/- 2-hour window of the current time, score it higher.
+- Return the list of templates sorted by this score so the user gets intelligent suggestions on their dashboard based on their current routine habits.
