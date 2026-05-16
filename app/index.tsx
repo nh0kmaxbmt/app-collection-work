@@ -1,4 +1,4 @@
-// app/index.tsx — V6.4 Adaptive Theme Dashboard (Native Header & Reactive Sorting)
+// app/index.tsx — V7.5 Bulletproof Safe Area Layout (Fixed Helper Text Clipping)
 import { useState, useMemo } from 'react';
 import { Stack } from 'expo-router';
 import {
@@ -11,10 +11,7 @@ import {
   StyleSheet,
   useColorScheme,
 } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  withTiming,
-} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useFlightManual } from '../src/core/store';
 import type { Collection, Template } from '../src/core/types';
@@ -29,6 +26,9 @@ export default function Dashboard() {
   // Detect system color scheme for adaptive theming
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+
+  // Get safe area insets for proper positioning
+  const insets = useSafeAreaInsets();
 
   // Reactive sorting with useMemo - re-evaluates when sortMode or dependencies change
   const sortedCollections = useMemo(() => {
@@ -120,27 +120,6 @@ export default function Dashboard() {
     );
   };
 
-  // Animated slider position - proper 50/50 split alignment
-  const sliderStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: withTiming(sortMode === 'recent' ? 0 : 1, { duration: 250 }) }],
-  }));
-
-  // Adaptive color styles based on current theme mode
-  const adaptiveStyles = {
-    container: isDark ? styles.containerDark : styles.containerLight,
-    searchInputWrapper: isDark ? styles.searchInputWrapperDark : styles.searchInputWrapperLight,
-    searchInput: isDark ? styles.searchInputDark : styles.searchInputLight,
-    searchPlaceholder: isDark ? '#6b7280' : '#9ca3af',
-    toggleBackground: isDark ? styles.toggleBackgroundDark : styles.toggleBackgroundLight,
-    toggleButtonText: isDark ? styles.toggleButtonTextDark : styles.toggleButtonTextLight,
-    toggleButtonTextInactive: isDark ? styles.toggleButtonTextInactiveDark : styles.toggleButtonTextInactiveLight,
-    sectionTitle: isDark ? styles.sectionTitleDark : styles.sectionTitleLight,
-    rowCard: isDark ? styles.rowCardDark : styles.rowCardLight,
-    cardTitle: isDark ? styles.cardTitleDark : styles.cardTitleLight,
-    cardMetadata: isDark ? styles.cardMetadataDark : styles.cardMetadataLight,
-    hintText: isDark ? styles.hintTextDark : styles.hintTextLight,
-  };
-
   // Helper to format card metadata line
   const formatMetadataLine = (description: string | undefined, tags: string[]): string => {
     const desc = description || '';
@@ -156,36 +135,52 @@ export default function Dashboard() {
     return mode === 'linear' ? 'Sequential' : 'Flexible';
   };
 
+  // Calculate scroll content container style with proper safe area padding
+  const scrollContentContainerStyle = {
+    paddingBottom: insets.bottom + 100,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  };
+
+  // Helper text container style with safe area padding - positioned absolutely above nav bar
+  const helperTextStyle = {
+    position: 'absolute' as const,
+    bottom: insets.bottom + 12,
+    left: 0,
+    right: 0,
+    alignItems: 'center' as const,
+  };
+
+  // Adaptive styles object
+  const styles = getStyles(isDark);
+
   return (
     <>
       {/* Native Expo Router Header */}
       <Stack.Screen
         options={{
           headerShown: true,
-          title: 'FlightManual',
+          title: 'FlyManual',
           headerShadowVisible: false,
           headerStyle: {
-            backgroundColor: isDark ? '#09090b' : '#fafafa',
+            backgroundColor: isDark ? '#09090b' : '#ffffff',
           },
           headerTitleStyle: {
             color: isDark ? '#f4f4f5' : '#09090b',
             fontWeight: 'bold',
+            fontSize: 22,
           },
-          headerRight: () => (
-            <Pressable onPress={() => router.push('/settings' as any)} style={styles.settingsButton}>
-              <Text style={styles.settingsIcon}>⚙️</Text>
-            </Pressable>
-          ),
         }}
       />
 
-      <View style={adaptiveStyles.container}>
-        {/* Search */}
-        <View style={styles.searchContainer}>
-          <View style={adaptiveStyles.searchInputWrapper}>
+      {/* Main Container - flex-1 bg-zinc-50 dark:bg-zinc-950 */}
+      <View style={styles.container}>
+        {/* Search Bar */}
+        <View style={styles.searchWrapper}>
+          <View style={styles.searchInputWrapper}>
             <TextInput
-              style={adaptiveStyles.searchInput}
-              placeholderTextColor={adaptiveStyles.searchPlaceholder}
+              style={styles.searchInput}
+              placeholderTextColor={isDark ? '#71717a' : '#a1a1aa'}
               placeholder="Search collections and routines..."
               value={search}
               onChangeText={setSearch}
@@ -194,359 +189,274 @@ export default function Dashboard() {
           </View>
         </View>
 
-        {/* Sliding sort toggle - Fixed equal 50/50 split with proper sync */}
-        <View style={styles.toggleContainer}>
-          <View style={adaptiveStyles.toggleBackground}>
-            {/* Animated background slider - exactly 50% width */}
-            <Animated.View
+        {/* Segment Selector Bar - flex-row bg-zinc-100 dark:bg-zinc-900/80 p-1 rounded-xl mb-4 mx-2 */}
+        <View style={styles.segmentWrapper}>
+          <View style={styles.segmentBackground}>
+            {/* Most Recent Tab */}
+            <Pressable
+              onPress={() => setSortMode('recent')}
               style={[
-                styles.sliderIndicator,
-                sliderStyle,
+                styles.segmentTab,
+                sortMode === 'recent' ? styles.segmentTabActive : styles.segmentTabInactive,
               ]}
-            />
-            <View style={styles.toggleButtonsRow}>
-              <Pressable
-                onPress={() => setSortMode('recent')}
-                style={styles.toggleButton}
+            >
+              <Text
+                style={[
+                  styles.segmentTabText,
+                  sortMode === 'recent' ? styles.segmentTabTextActive : styles.segmentTabTextInactive,
+                ]}
               >
-                <Text style={[
-                  adaptiveStyles.toggleButtonText,
-                  sortMode !== 'recent' ? adaptiveStyles.toggleButtonTextInactive : null
-                ]}>
-                  Most Recent
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setSortMode('used')}
-                style={styles.toggleButton}
+                Most Recent
+              </Text>
+            </Pressable>
+
+            {/* Most Used Tab */}
+            <Pressable
+              onPress={() => setSortMode('used')}
+              style={[
+                styles.segmentTab,
+                sortMode === 'used' ? styles.segmentTabActive : styles.segmentTabInactive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.segmentTabText,
+                  sortMode === 'used' ? styles.segmentTabTextActive : styles.segmentTabTextInactive,
+                ]}
               >
-                <Text style={[
-                  adaptiveStyles.toggleButtonText,
-                  sortMode !== 'used' ? adaptiveStyles.toggleButtonTextInactive : null
-                ]}>
-                  Most Used
-                </Text>
-              </Pressable>
-            </View>
+                Most Used
+              </Text>
+            </Pressable>
           </View>
         </View>
 
-        <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          {/* Templates (compound combos) */}
+        {/* Scrollable Content - flex-1 with contentContainerStyle padding */}
+        <ScrollView
+          style={styles.scrollContent}
+          contentContainerStyle={scrollContentContainerStyle}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Templates Section */}
           {sortedTemplates.length > 0 && (
             <View style={styles.section}>
-              <Text style={adaptiveStyles.sectionTitle}>Saved Routines</Text>
+              <Text style={styles.sectionTitle}>Saved Routines</Text>
               {sortedTemplates.map((tpl) => (
                 <Pressable
                   key={tpl.id}
                   onPress={() => handleLaunchTemplate(tpl.id)}
                   onLongPress={() => handleDeleteTemplate(tpl)}
                   style={({ pressed }) => [
-                    adaptiveStyles.rowCard,
-                    pressed && styles.rowCardPressed,
+                    styles.card,
+                    pressed && styles.cardPressed,
                   ]}
                 >
-                  <View style={styles.cardContent}>
-                    {/* Line 1: Title with collection count */}
-                    <Text style={adaptiveStyles.cardTitle}>
-                      {tpl.title} ({tpl.templateIds.length} collection{tpl.templateIds.length !== 1 ? 's' : ''})
+                  {/* Line 1: Title with collection count */}
+                  <Text style={styles.cardTitle}>
+                    {tpl.title} ({tpl.templateIds.length} collection{tpl.templateIds.length !== 1 ? 's' : ''})
+                  </Text>
+                  {/* Line 2: Description */}
+                  {tpl.description && (
+                    <Text style={styles.cardMetadata}>
+                      {tpl.description}
                     </Text>
-                    {/* Line 2: Description only (templates don't have tags) */}
-                    {tpl.description && (
-                      <Text style={adaptiveStyles.cardMetadata}>
-                        {tpl.description}
-                      </Text>
-                    )}
-                  </View>
+                  )}
                 </Pressable>
               ))}
             </View>
           )}
 
-          {/* Collections (standalone lists) */}
+          {/* Collections Section */}
           <View style={styles.section}>
-            <Text style={adaptiveStyles.sectionTitle}>Collections</Text>
+            <Text style={styles.sectionTitle}>Collections</Text>
             {sortedCollections.map((col) => (
               <Pressable
                 key={col.id}
                 onPress={() => handleLaunchCollection(col.id)}
                 onLongPress={() => handleDeleteCollection(col)}
                 style={({ pressed }) => [
-                  adaptiveStyles.rowCard,
-                  pressed && styles.rowCardPressed,
+                  styles.card,
+                  pressed && styles.cardPressed,
                 ]}
               >
-                <View style={styles.cardContent}>
-                  {/* Line 1: Name with step count and execution mode */}
-                  <Text style={adaptiveStyles.cardTitle}>
-                    {col.name} ({col.steps.length} steps) · {getExecutionModeLabel(col.executionMode)}
+                {/* Line 1: Name with step count and execution mode */}
+                <Text style={styles.cardTitle}>
+                  {col.name} ({col.steps.length} steps) · {getExecutionModeLabel(col.executionMode)}
+                </Text>
+                {/* Line 2: Description with tags */}
+                {(col.description || col.tags.length > 0) && (
+                  <Text style={styles.cardMetadata}>
+                    {formatMetadataLine(col.description, col.tags)}
                   </Text>
-                  {/* Line 2: Description with tags */}
-                  {(col.description || col.tags.length > 0) && (
-                    <Text style={adaptiveStyles.cardMetadata}>
-                      {formatMetadataLine(col.description, col.tags)}
-                    </Text>
-                  )}
-                </View>
+                )}
               </Pressable>
             ))}
           </View>
         </ScrollView>
 
-        {/* FAB for new collection */}
+        {/* FAB - Positioned absolutely outside ScrollView */}
         <Pressable
           onPress={() => router.push('/create-template' as any)}
-          style={styles.fab}
+          style={{ position: 'absolute', bottom: insets.bottom + 20, right: 24 }}
         >
-          <Text style={styles.fabText}>+</Text>
+          <View style={styles.fab}>
+            <Text style={styles.fabText}>+</Text>
+          </View>
         </Pressable>
 
-        {/* Hint text */}
-        <View style={styles.hintContainer}>
-          <Text style={adaptiveStyles.hintText}>Tap to launch • Long press to delete</Text>
+        {/* Helper Text - Positioned with Safe Area padding to prevent clipping by nav bar */}
+        <View style={helperTextStyle}>
+          <Text style={styles.hintText}>Tap to launch • Long press to delete</Text>
         </View>
       </View>
     </>
   );
 }
 
-const styles = StyleSheet.create({
-  // Native header is configured via Stack.Screen options above
+// Style generator function for adaptive theming
+function getStyles(isDark: boolean) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: isDark ? '#09090b' : '#fafafa',
+    },
 
-  // Settings button in header
-  settingsButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'transparent',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  settingsIcon: {
-    fontSize: 18,
-  },
+    // Search styles
+    searchWrapper: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 16,
+    },
+    searchInputWrapper: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: isDark ? '#27272a' : '#e4e4e7',
+      backgroundColor: isDark ? '#18181b' : '#ffffff',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+    searchInput: {
+      fontSize: 16,
+      color: isDark ? '#fafafa' : '#18181b',
+    },
 
-  // Container - Adaptive light/dark
-  containerLight: {
-    flex: 1,
-    backgroundColor: '#fafafa',
-  },
-  containerDark: {
-    flex: 1,
-    backgroundColor: '#09090b',
-  },
+    // Segment selector styles
+    segmentWrapper: {
+      paddingHorizontal: 16,
+      marginBottom: 16,
+    },
+    segmentBackground: {
+      flexDirection: 'row',
+      backgroundColor: isDark ? '#27272a' : '#f4f4f5',
+      padding: 4,
+      borderRadius: 12,
+    },
+    segmentTab: {
+      flex: 1,
+      paddingVertical: 10,
+      borderRadius: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    segmentTabActive: {
+      backgroundColor: '#2563eb',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    segmentTabInactive: {
+      backgroundColor: 'transparent',
+    },
+    segmentTabText: {
+      fontSize: 14,
+      fontWeight: '600',
+    },
+    segmentTabTextActive: {
+      color: '#ffffff',
+    },
+    segmentTabTextInactive: {
+      color: isDark ? '#a1a1aa' : '#71717a',
+    },
 
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 16,
-  },
-  searchInputWrapperLight: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e4e4e7',
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  searchInputWrapperDark: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    backgroundColor: '#18181b',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  searchInputLight: {
-    fontSize: 16,
-    color: '#18181b',
-  },
-  searchInputDark: {
-    fontSize: 16,
-    color: '#fafafa',
-  },
+    // Scroll content - flex-1
+    scrollContent: {
+      flex: 1,
+    },
 
-  toggleContainer: {
-    marginBottom: 16,
-    paddingHorizontal: 16,
-  },
-  toggleBackgroundLight: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    backgroundColor: '#e4e4e7',
-    padding: 4,
-    position: 'relative',
-  },
-  toggleBackgroundDark: {
-    flexDirection: 'row',
-    borderRadius: 12,
-    backgroundColor: '#27272a',
-    padding: 4,
-    position: 'relative',
-  },
-  toggleButtonsRow: {
-    flexDirection: 'row',
-    width: '100%',
-    zIndex: 1,
-  },
-  sliderIndicator: {
-    position: 'absolute',
-    top: 4,
-    left: 4,
-    width: '50%',
-    height: 36,
-    backgroundColor: '#3b82f6',
-    borderRadius: 8,
-  },
-  toggleButton: {
-    flex: 1,
-    width: '50%',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  toggleButtonTextLight: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
-  },
-  toggleButtonTextDark: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fafafa',
-  },
-  toggleButtonTextInactiveLight: {
-    color: '#a1a1aa',
-  },
-  toggleButtonTextInactiveDark: {
-    color: '#71717a',
-  },
+    // Section
+    section: {
+      marginBottom: 24,
+    },
+    sectionTitle: {
+      marginBottom: 12,
+      fontSize: 12,
+      fontWeight: '700',
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      color: isDark ? '#818cf8' : '#3b82f6',
+    },
 
-  scrollContent: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitleLight: {
-    marginBottom: 12,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    color: '#3b82f6',
-  },
-  sectionTitleDark: {
-    marginBottom: 12,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    color: '#818cf8',
-  },
+    // Card styles
+    card: {
+      backgroundColor: isDark ? '#18181b' : '#ffffff',
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: isDark ? '#27272a' : '#e4e4e7',
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      marginBottom: 12,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: isDark ? 0.1 : 0.05,
+      shadowRadius: 2,
+      elevation: 1,
+    },
+    cardPressed: {
+      transform: [{ scale: 0.99 }],
+    },
 
-  // Row cards - Adaptive light/dark with shadow
-  // Matches: bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-2xl mb-3 shadow-sm
-  rowCardLight: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e4e4e7',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  rowCardDark: {
-    backgroundColor: '#18181b',
-    borderRadius: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 1,
-  },
-  rowCardPressed: {
-    transform: [{ scale: 0.99 }],
-  },
-  cardContent: {
-    flex: 1,
-  },
+    // Card title
+    cardTitle: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: isDark ? '#fafafa' : '#18181b',
+      marginBottom: 4,
+    },
 
-  // Card title - text-base font-bold text-zinc-900 dark:text-zinc-100
-  cardTitleLight: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#18181b',
-    marginBottom: 4,
-  },
-  cardTitleDark: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fafafa',
-    marginBottom: 4,
-  },
+    // Card metadata
+    cardMetadata: {
+      fontSize: 14,
+      color: isDark ? '#a1a1aa' : '#71717a',
+      marginTop: 4,
+    },
 
-  // Card metadata - text-sm text-zinc-500 dark:text-zinc-400 mt-1
-  cardMetadataLight: {
-    fontSize: 14,
-    color: '#71717a',
-    marginTop: 4,
-  },
-  cardMetadataDark: {
-    fontSize: 14,
-    color: '#a1a1aa',
-    marginTop: 4,
-  },
+    // FAB
+    fab: {
+      width: 56,
+      height: 56,
+      borderRadius: 28,
+      backgroundColor: '#2563eb',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 8,
+    },
+    fabText: {
+      fontSize: 32,
+      fontWeight: '300',
+      color: '#ffffff',
+      lineHeight: 36,
+    },
 
-  fab: {
-    position: 'absolute',
-    bottom: 24,
-    right: 24,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#2563eb',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  fabText: {
-    fontSize: 32,
-    fontWeight: '300',
-    color: '#ffffff',
-    lineHeight: 36,
-  },
-
-  hintContainer: {
-    position: 'absolute',
-    bottom: 24,
-    left: 16,
-    right: 88,
-  },
-  hintTextLight: {
-    fontSize: 11,
-    color: '#a1a1aa',
-    textAlign: 'center',
-  },
-  hintTextDark: {
-    fontSize: 11,
-    color: '#52525b',
-    textAlign: 'center',
-  },
-});
+    // Hint text - text-xs font-medium text-zinc-400 dark:text-zinc-500
+    hintText: {
+      fontSize: 12,
+      fontWeight: '500',
+      color: isDark ? '#71717a' : '#a1a1aa',
+    },
+  });
+}
