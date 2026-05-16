@@ -1,4 +1,50 @@
-// src/core/store.tsx — V3 Multi-Select Engine
+# 10 — The V3 Core Context Store
+
+## Source
+`docs/gemini-archive/component/gemini-10-The V3 Core Context Store.txt`
+Schema context: `docs/gemini-archive/manual/gemini_manual-03-app-data-insert.md` Part 3
+
+## Feature Description
+Upgraded state engine that replaces the single-select branch model with a dynamic multi-select matrix. Adds `saveCustomTemplate()` for user-generated templates and `toggleBranchOption()` for reversible branch injection/removal.
+
+## Requirements
+1. Manage `templates`, `activeRun`, `historyLogs` — seed with Gym Session Prep if empty
+2. **`saveCustomTemplate(name, tags, stepTexts)`** — maps step texts into `Step[]` objects, auto-assigns sequential `dependsOnStepId` for linear gating, generates unique IDs, pushes to templates, persists
+3. **`toggleBranchOption(optionKey, branchSteps)`** — replaces single `selectBranch`:
+   - If optionKey NOT in `selectedBranches`: append it, inject branch steps with `branchSource: optionKey`, fix `dependsOnStepId` to chain from last base step
+   - If optionKey IS in `selectedBranches`: remove it, filter out all steps where `branchSource === optionKey`
+4. Production-ready with clean re-renders
+
+## V3 Schema Changes (from manual-03)
+```typescript
+// Step now has branchSource
+export interface Step {
+  id: string;
+  text: string;
+  isCompleted: boolean;
+  isLocked: boolean;
+  dependsOnStepId?: string;
+  branchSource?: string; // tracks which option injected this task
+}
+
+// RunInstance.selectedBranches is now string[]
+export interface RunInstance {
+  // ...
+  selectedBranches: string[]; // was selectedBranch?: string
+}
+```
+
+## Adaptation Notes (Expo / React Native)
+- Same `@react-native-async-storage/async-storage` dependency
+- `useCallback` on all actions to prevent unnecessary re-renders
+- `toggleBranchOption` must handle unlocking the first injected step correctly when adding, and re-evaluate lock states when removing
+
+---
+
+## Sample Code: `src/core/store.ts`
+
+```typescript
+// src/core/store.ts — V3 Multi-Select Engine
 import { createContext, useContext, useReducer, useEffect, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Template, RunInstance, RunLog, Step } from './types';
@@ -182,18 +228,12 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
           type: 'HYDRATE',
           payload: {
             templates: tplJson ? JSON.parse(tplJson) : SEED_TEMPLATES,
-            activeRun: runJson && runJson !== '' ? JSON.parse(runJson) : null,
+            activeRun: runJson ? JSON.parse(runJson) : null,
             historyLogs: logsJson ? JSON.parse(logsJson) : SEED_LOGS,
           },
         });
       } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        if (errorMessage.includes('Native module is null')) {
-          console.warn('[FlightManual] AsyncStorage not available, using in-memory storage only');
-          console.warn('[FlightManual] Run: npx expo run:ios or npx expo run:android to rebuild');
-        } else {
-          console.error('[FlightManual] Hydration failed:', e);
-        }
+        console.error('[FlightManual] Hydration failed:', e);
         dispatch({
           type: 'HYDRATE',
           payload: { templates: SEED_TEMPLATES, activeRun: null, historyLogs: SEED_LOGS },
@@ -207,19 +247,13 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     if (state.isLoading) return;
     (async () => {
       try {
-        const activeRunValue = state.activeRun ? JSON.stringify(state.activeRun) : '';
         await Promise.all([
           AsyncStorage.setItem(KEYS.templates, JSON.stringify(state.templates)),
-          AsyncStorage.setItem(KEYS.activeRun, activeRunValue),
+          AsyncStorage.setItem(KEYS.activeRun, JSON.stringify(state.activeRun)),
           AsyncStorage.setItem(KEYS.runLogs, JSON.stringify(state.historyLogs)),
         ]);
       } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        if (errorMessage.includes('Native module is null')) {
-          if (Math.random() < 0.01) {
-            console.warn('[FlightManual] AsyncStorage persistence unavailable - rebuild dev client with: npx expo run:ios');
-          }
-        }
+        console.error('[FlightManual] Persist failed:', e);
       }
     })();
   }, [state.templates, state.activeRun, state.historyLogs, state.isLoading]);
@@ -293,6 +327,4 @@ export function useFlightManual(): FlightContextValue {
   if (!ctx) throw new Error('useFlightManual must be used within FlightManualProvider');
   return ctx;
 }
-
-// ─── Legacy exports for backward compatibility ──────────────
-export { useFlightManual as useStore, FlightManualProvider as StoreProvider };
+```

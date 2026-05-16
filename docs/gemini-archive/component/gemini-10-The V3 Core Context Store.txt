@@ -1,0 +1,10 @@
+Context: React Native Context State engine for FlightManual using AsyncStorage.
+Task: Write 'src/core/store.ts' using TypeScript.
+Requirements:
+- Manage local state for 'templates', 'activeRun', and 'historyLogs'. Seed with 'Gym Session Prep' if empty.
+- Add an explicit function: 'saveCustomTemplate(name: string, tags: string[], stepTexts: string[])'. This function must take user input, map the stepTexts into an array of 'Step' objects, auto-assign sequential 'dependsOnStepId' strings so they are linearly gated, prepend a unique ID, push it to 'templates' state, and save to AsyncStorage.
+- Rewrite 'toggleBranchOption(optionKey: string, branchSteps: Step[])':
+  1. Check if optionKey already exists in activeRun.selectedBranches.
+  2. If it does NOT exist: Add optionKey to selectedBranches. Append the branchSteps to activeRun.currentSteps. Ensure each appended step has 'branchSource: optionKey' set. Fix their 'dependsOnStepId' to map to the last base step.
+  3. If it DOES exist: Remove optionKey from selectedBranches. Filter out and delete any steps from activeRun.currentSteps where 'branchSource === optionKey'.
+- Ensure state updates trigger clean re-renders. Write fully production-ready code.

@@ -1,13 +1,13 @@
-// app/index.tsx
+// app/index.tsx — V3 Command Palette with FAB
 import { useState, useRef } from 'react';
 import { View, TextInput, FlatList, Pressable, Text, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
-import { useStore } from '../src/core/store';
+import { useFlightManual } from '../src/core/store';
 import { getWeightedTemplates } from '../src/core/engine';
 import type { Template } from '../src/core/types';
 
 export default function CommandPalette() {
-  const { state, startRun } = useStore();
+  const { state, startRun } = useFlightManual();
   const [query, setQuery] = useState('');
   const inputRef = useRef<TextInput>(null);
 
@@ -70,6 +70,14 @@ export default function CommandPalette() {
           ) : null
         }
       />
+
+      {/* Floating Action Button */}
+      <Pressable
+        onPress={() => router.push('/create-template' as any)}
+        style={styles.fab}
+      >
+        <Text style={styles.fabText}>+</Text>
+      </Pressable>
     </View>
   );
 }
@@ -124,5 +132,27 @@ const styles = StyleSheet.create({
     marginTop: 32,
     textAlign: 'center',
     color: '#4b5563',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 32,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#2563eb',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  fabText: {
+    fontSize: 32,
+    fontWeight: '300',
+    color: '#ffffff',
+    lineHeight: 36,
   },
 });

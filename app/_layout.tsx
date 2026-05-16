@@ -40,6 +40,7 @@ export default function RootLayout() {
               <Stack>
                 <Stack.Screen name="index" options={INDEX_OPTIONS} />
                 <Stack.Screen name="flight-deck" options={FLIGHT_DECK_OPTIONS} />
+                <Stack.Screen name="create-template" options={CREATE_TEMPLATE_OPTIONS} />
                 <Stack.Screen name="modal" options={MODAL_OPTIONS} />
               </Stack>
             </NavThemeProvider>
@@ -69,6 +70,11 @@ function SettingsIcon() {
 
 const FLIGHT_DECK_OPTIONS = {
   title: 'Flight Deck',
+  headerBackTitle: 'Back',
+} as const;
+
+const CREATE_TEMPLATE_OPTIONS = {
+  title: 'New Template',
   headerBackTitle: 'Back',
 } as const;
 

@@ -1,14 +1,15 @@
-// app/flight-deck.tsx
+// app/flight-deck.tsx — V3 Multi-Select Flight Deck
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
-import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, withTiming, Layout } from 'react-native-reanimated';
 import { router } from 'expo-router';
-import { useStore } from '../src/core/store';
+import { useFlightManual } from '../src/core/store';
 import { StepItem } from '../src/components/StepItem';
+import type { Step } from '../src/core/types';
 
 const AnimatedView = Animated.View;
 
 export default function FlightDeck() {
-  const { state, toggleStep, selectBranch, completeRun } = useStore();
+  const { state, toggleBranchOption, toggleStep, completeRun } = useFlightManual();
   const { activeRun, templates } = state;
 
   if (!activeRun) {
@@ -23,14 +24,16 @@ export default function FlightDeck() {
   }
 
   const template = templates.find((t) => t.id === activeRun.templateId);
-  const hasBranching = template?.branchingStep;
-  const branchChosen = hasBranching
-    ? activeRun.currentSteps.some((s) => s.id.startsWith('legs-') || s.id.startsWith('core-'))
-    : true;
+  const hasBranching = !!template?.branchingStep;
 
   const completedCount = activeRun.currentSteps.filter((s) => s.isCompleted).length;
   const totalCount = activeRun.currentSteps.length;
   const progress = totalCount > 0 ? completedCount / totalCount : 0;
+
+  const handleBranchToggle = (key: string) => {
+    const steps = template!.branchingStep!.options[key] ?? [];
+    toggleBranchOption(key, steps);
+  };
 
   const handleComplete = () => {
     completeRun();
@@ -47,40 +50,52 @@ export default function FlightDeck() {
         </Text>
       </View>
 
-      {/* Branch selector */}
-      {hasBranching && !branchChosen && (
+      {/* Multi-select branch chips */}
+      {hasBranching && (
         <View style={styles.branchSelector}>
           <Text style={styles.branchQuestion}>
             {template!.branchingStep!.question}
           </Text>
-          <View style={styles.branchOptions}>
-            {Object.keys(template!.branchingStep!.options).map((key) => (
-              <Pressable
-                key={key}
-                onPress={() => selectBranch(key)}
-                style={styles.branchOption}
-              >
-                <Text style={styles.branchOptionText}>{key}</Text>
-              </Pressable>
-            ))}
+          <View style={styles.branchChipsContainer}>
+            {Object.keys(template!.branchingStep!.options).map((key) => {
+              const isSelected = activeRun.selectedBranches.includes(key);
+              return (
+                <Pressable
+                  key={key}
+                  onPress={() => handleBranchToggle(key)}
+                  style={[
+                    styles.branchChip,
+                    isSelected ? styles.branchChipSelected : styles.branchChipUnselected,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.branchChipText,
+                      isSelected ? styles.branchChipTextSelected : styles.branchChipTextUnselected,
+                    ]}
+                  >
+                    {isSelected ? '✓ ' : ''}{key}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
       )}
 
-      {/* Steps list */}
+      {/* Step list with layout animation */}
       <ScrollView
         style={styles.stepsList}
         contentContainerStyle={styles.stepsListContent}
         showsVerticalScrollIndicator={false}
       >
-        {activeRun.currentSteps.map((step) => (
-          <StepItem
-            key={step.id}
-            step={step}
-            onToggle={() => {
-              if (!step.isLocked) toggleStep(step.id);
-            }}
-          />
+        {activeRun.currentSteps.map((step: Step) => (
+          <AnimatedView key={step.id} layout={Layout.springify()}>
+            <StepItem
+              step={step}
+              onToggle={() => { if (!step.isLocked) toggleStep(step.id); }}
+            />
+          </AnimatedView>
         ))}
       </ScrollView>
 
@@ -100,7 +115,7 @@ export default function FlightDeck() {
           />
         </View>
 
-        {/* Complete button */}
+        {/* Complete / status */}
         <Pressable
           onPress={handleComplete}
           disabled={!activeRun.isFinished}
@@ -115,7 +130,9 @@ export default function FlightDeck() {
               activeRun.isFinished ? styles.completeButtonTextActive : styles.completeButtonTextInactive,
             ]}
           >
-            {activeRun.isFinished ? 'Complete Run & Reset' : `${totalCount - completedCount} steps remaining`}
+            {activeRun.isFinished
+              ? 'Complete Run & Reset'
+              : `${totalCount - completedCount} steps remaining`}
           </Text>
         </Pressable>
       </View>
@@ -172,27 +189,39 @@ const styles = StyleSheet.create({
   },
   branchQuestion: {
     marginBottom: 12,
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    color: '#ffffff',
+    color: '#9ca3af',
   },
-  branchOptions: {
+  branchChipsContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
   },
-  branchOption: {
-    flex: 1,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#3b82f6',
-    backgroundColor: '#111827',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  branchChip: {
+    borderRadius: 20,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
   },
-  branchOptionText: {
-    textAlign: 'center',
+  branchChipSelected: {
+    borderWidth: 2,
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
+  },
+  branchChipUnselected: {
+    borderWidth: 1,
+    borderColor: '#374151',
+    backgroundColor: '#111827',
+  },
+  branchChipText: {
+    fontSize: 14,
     fontWeight: '600',
+  },
+  branchChipTextSelected: {
     color: '#60a5fa',
+  },
+  branchChipTextUnselected: {
+    color: '#9ca3af',
   },
   stepsList: {
     flex: 1,

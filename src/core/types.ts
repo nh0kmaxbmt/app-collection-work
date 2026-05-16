@@ -1,4 +1,4 @@
-// src/core/types.ts
+// src/core/types.ts — V3 Multi-Select Engine
 
 export interface Step {
   id: string;
@@ -6,6 +6,7 @@ export interface Step {
   isCompleted: boolean;
   isLocked: boolean;
   dependsOnStepId?: string;
+  branchSource?: string; // tracks which option injected this task
 }
 
 export interface BranchingStep {
@@ -26,7 +27,7 @@ export interface RunInstance {
   templateId: string;
   startedAt: number;
   currentSteps: Step[];
-  selectedBranch?: string;
+  selectedBranches: string[]; // V3: now an array for multi-selection
   isFinished: boolean;
 }
 

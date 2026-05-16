@@ -1,0 +1,8 @@
+Context: New creation form screen for FlightManual using NativeWind.
+Task: Write 'app/create-template.tsx'.
+Requirements:
+- Build a clean form with text inputs for 'Template Name' and comma-separated 'Tags'.
+- Create a dynamic dynamic step builder state array. Render an un-ordered list of current steps with a text input for each.
+- Provide an '[+ Add Step]' button that appends a blank string to your inputs tracking array.
+- Provide a save button. Clicking it verifies inputs are non-empty, triggers 'saveCustomTemplate(name, tags, steps)', clears the form state, and uses 'router.back()' to return to the search dashboard.
+- Style with a minimalist dark layout matching a developer-tool utility aesthetic.

@@ -1,0 +1,8 @@
+Context: Expo Router execution view using NativeWind and useFlightManual context.
+Task: Write 'app/flight-deck.tsx'.
+Requirements:
+- Check if activeRun has branching step configuration.
+- Render the branching options as a multi-select layout using clear, high-contrast toggle chips or checkable cards instead of a rigid single-option gate.
+- Tapping an option must check/uncheck it. When tapped, invoke 'toggleBranchOption(key, steps)' from the store. This must instantly animate the injection or removal of tasks on screen.
+- Render the current active list dynamically. The rest of the execution flow remains strictly linear—downstream steps stay visually locked until their prerequisite parent step is checked off.
+- Render the bottom completion drawer once all currently visible tasks in the array evaluate to 'isCompleted === true'.
