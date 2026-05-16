@@ -1,4 +1,4 @@
-// app/index.tsx — V7.5 Bulletproof Safe Area Layout (Fixed Helper Text Clipping)
+// app/index.tsx — V8.0 Optimized Dashboard (Clean Rows, Settings Link, Fixed Spacing)
 import { useState, useMemo } from 'react';
 import { Stack } from 'expo-router';
 import {
@@ -130,15 +130,10 @@ export default function Dashboard() {
     return desc || tagsStr;
   };
 
-  // Helper to get execution mode display label
-  const getExecutionModeLabel = (mode: 'linear' | 'parallel'): string => {
-    return mode === 'linear' ? 'Sequential' : 'Flexible';
-  };
-
   // Calculate scroll content container style with proper safe area padding
   const scrollContentContainerStyle = {
-    paddingBottom: insets.bottom + 100,
-    paddingHorizontal: 16,
+    paddingBottom: insets.bottom + 120,
+    paddingHorizontal: 12,
     paddingTop: 8,
   };
 
@@ -156,7 +151,7 @@ export default function Dashboard() {
 
   return (
     <>
-      {/* Native Expo Router Header */}
+      {/* Native Expo Router Header with Settings Button */}
       <Stack.Screen
         options={{
           headerShown: true,
@@ -170,6 +165,11 @@ export default function Dashboard() {
             fontWeight: 'bold',
             fontSize: 22,
           },
+          headerRight: () => (
+            <Pressable onPress={() => router.push('/settings')} style={styles.headerButton}>
+              <Text style={styles.headerButtonText}>Settings</Text>
+            </Pressable>
+          ),
         }}
       />
 
@@ -250,7 +250,7 @@ export default function Dashboard() {
                     pressed && styles.cardPressed,
                   ]}
                 >
-                  {/* Line 1: Title with collection count */}
+                  {/* Line 1: Title with collection count - NO execution mode label */}
                   <Text style={styles.cardTitle}>
                     {tpl.title} ({tpl.templateIds.length} collection{tpl.templateIds.length !== 1 ? 's' : ''})
                   </Text>
@@ -268,34 +268,74 @@ export default function Dashboard() {
           {/* Collections Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Collections</Text>
-            {sortedCollections.map((col) => (
-              <Pressable
+            {sortedCollections.map((col, idx) => (
+              <View
                 key={col.id}
-                onPress={() => handleLaunchCollection(col.id)}
-                onLongPress={() => handleDeleteCollection(col)}
-                style={({ pressed }) => [
-                  styles.card,
-                  pressed && styles.cardPressed,
-                ]}
+                style={{
+                  // Add vertical padding only BETWEEN cards, responsive for different screens
+                  marginTop: idx !== 0 ? 12 : 0,
+                  // Responsive: use percentage or min/max for spacing on larger screens if needed
+                  // This is a compromise for RN - most lists just use px
+                  // On larger screens, "12" can be scaled as needed, see below for style example
+                }}
               >
-                {/* Line 1: Name with step count and execution mode */}
-                <Text style={styles.cardTitle}>
-                  {col.name} ({col.steps.length} steps) · {getExecutionModeLabel(col.executionMode)}
-                </Text>
-                {/* Line 2: Description with tags */}
-                {(col.description || col.tags.length > 0) && (
-                  <Text style={styles.cardMetadata}>
-                    {formatMetadataLine(col.description, col.tags)}
-                  </Text>
-                )}
-              </Pressable>
+                <Pressable
+                  onPress={() => handleLaunchCollection(col.id)}
+                  onLongPress={() => handleDeleteCollection(col)}
+                  style={({ pressed }) => [
+                    styles.card,
+                    pressed && styles.cardPressed,
+                    // Responsive card minHeight for larger screens
+                    { minHeight: 64 }
+                  ]}
+                >
+                  {/* Keep name and description close with responsive gap */}
+                  <View>
+                    <Text
+                      style={[
+                        styles.cardTitle,
+                        // Responsive font size based on screen width
+                        {
+                          fontSize:
+                            // @ts-ignore
+                            typeof window !== 'undefined' && window.innerWidth > 600
+                              ? 19
+                              : 16,
+                        },
+                      ]}
+                    >
+                      {col.name} ({col.steps.length} steps)
+                    </Text>
+                    {(col.description || col.tags.length > 0) && (
+                      <Text
+                        style={[
+                          styles.cardMetadata,
+                          // Responsive font and margin
+                          {
+                            marginTop: 3,
+                            fontSize:
+                              // @ts-ignore
+                              typeof window !== 'undefined' && window.innerWidth > 600
+                                ? 15
+                                : 13,
+                          },
+                        ]}
+                        numberOfLines={2}
+                        ellipsizeMode="tail"
+                      >
+                        {formatMetadataLine(col.description, col.tags)}
+                      </Text>
+                    )}
+                  </View>
+                </Pressable>
+              </View>
             ))}
           </View>
         </ScrollView>
 
         {/* FAB - Positioned absolutely outside ScrollView */}
         <Pressable
-          onPress={() => router.push('/create-template' as any)}
+          onPress={() => router.push('/create-collection' as any)}
           style={{ position: 'absolute', bottom: insets.bottom + 20, right: 24 }}
         >
           <View style={styles.fab}>
@@ -305,7 +345,7 @@ export default function Dashboard() {
 
         {/* Helper Text - Positioned with Safe Area padding to prevent clipping by nav bar */}
         <View style={helperTextStyle}>
-          <Text style={styles.hintText}>Tap to launch • Long press to delete</Text>
+          <Text style={styles.hintText}>Tap to launch · Long press to delete</Text>
         </View>
       </View>
     </>
@@ -318,6 +358,20 @@ function getStyles(isDark: boolean) {
     container: {
       flex: 1,
       backgroundColor: isDark ? '#09090b' : '#fafafa',
+    },
+
+    // Header button styles
+    headerButton: {
+      marginRight: 16,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      backgroundColor: isDark ? '#27272a' : '#f4f4f5',
+    },
+    headerButtonText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: isDark ? '#f4f4f5' : '#09090b',
     },
 
     // Search styles
@@ -397,7 +451,7 @@ function getStyles(isDark: boolean) {
       color: isDark ? '#818cf8' : '#3b82f6',
     },
 
-    // Card styles
+    // Card styles - Updated with mb-4 spacing equivalent
     card: {
       backgroundColor: isDark ? '#18181b' : '#ffffff',
       borderRadius: 16,
@@ -405,7 +459,7 @@ function getStyles(isDark: boolean) {
       borderColor: isDark ? '#27272a' : '#e4e4e7',
       paddingHorizontal: 16,
       paddingVertical: 16,
-      marginBottom: 12,
+      marginBottom: 16,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 1 },
       shadowOpacity: isDark ? 0.1 : 0.05,
@@ -416,7 +470,7 @@ function getStyles(isDark: boolean) {
       transform: [{ scale: 0.99 }],
     },
 
-    // Card title
+    // Card title - text-base font-bold text-zinc-900 dark:text-zinc-100
     cardTitle: {
       fontSize: 16,
       fontWeight: '700',
@@ -424,11 +478,11 @@ function getStyles(isDark: boolean) {
       marginBottom: 4,
     },
 
-    // Card metadata
+    // Card metadata - text-sm text-zinc-500 dark:text-zinc-400 mt-0.5
     cardMetadata: {
       fontSize: 14,
       color: isDark ? '#a1a1aa' : '#71717a',
-      marginTop: 4,
+      marginTop: 2,
     },
 
     // FAB
