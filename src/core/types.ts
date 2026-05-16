@@ -1,6 +1,8 @@
-// src/core/types.ts — V6 Mid-Flight Composable Pipeline
+// src/core/types.ts — V8.1 Dashboard View Modes & Backup Support
 
 export type ExecutionMode = 'linear' | 'parallel';
+
+export type DashboardViewMode = 'list' | 'cloud';
 
 export interface Step {
   id: string;
@@ -42,4 +44,18 @@ export interface RunLog {
   collectionId: string;
   timestamp: number;
   durationMs: number;
+}
+
+// Backup/Restore Data Structure
+export interface FlightManualBackup {
+  version: string;
+  exportedAt: number;
+  collections: Collection[];
+  templates: Template[];
+  historyLogs: RunLog[];
+}
+
+// App-wide Settings State
+export interface AppSettings {
+  viewMode: DashboardViewMode;
 }

@@ -1,5 +1,5 @@
-// src/core/store.tsx — V6.1 Mid-Flight Composable Pipeline (Immutable & Storage-Safe)
-import { createContext, useContext, useReducer, useEffect, useCallback, type ReactNode } from 'react';
+// src/core/store.tsx — V8.1 Dashboard View Modes & Backup Engine
+import { createContext, useContext, useReducer, useEffect, useCallback, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   Collection,
@@ -9,6 +9,8 @@ import type {
   Step,
   CompiledStep,
   ExecutionMode,
+  DashboardViewMode,
+  FlightManualBackup,
 } from './types';
 
 const KEYS = {
@@ -16,6 +18,7 @@ const KEYS = {
   templates: 'flightmanual::templates',
   activeRun: 'flightmanual::active_run',
   runLogs: 'flightmanual::run_logs',
+  viewMode: 'flightmanual::view_mode',
 } as const;
 
 // ─── Seed data ──────────────────────────────────────────────
@@ -129,7 +132,8 @@ type Action =
   | { type: 'SAVE_TEMPLATE'; payload: Template }
   | { type: 'SAVE_COLLECTION'; payload: Collection }
   | { type: 'DELETE_TEMPLATE'; payload: string }
-  | { type: 'DELETE_COLLECTION'; payload: string };
+  | { type: 'DELETE_COLLECTION'; payload: string }
+  | { type: 'REPLACE_ALL_DATA'; payload: { collections: Collection[]; templates: Template[]; historyLogs: RunLog[] } };
 
 const initialState: FlightState = {
   collections: [],
@@ -203,7 +207,7 @@ function unlockNextLinearStep(
 
   // Unlock the next step immutably
   return steps.map(s =>
-    s.id === nextStep.id ? { ...s, isLocked: false } : s
+    s.id === nextStep.id ? { ...s, isLocked: false } : { ...s }
   );
 }
 
@@ -282,6 +286,14 @@ function reducer(state: FlightState, action: Action): FlightState {
     case 'DELETE_COLLECTION':
       return { ...state, collections: state.collections.filter((c) => c.id !== action.payload) };
 
+    case 'REPLACE_ALL_DATA':
+      return {
+        ...state,
+        collections: action.payload.collections,
+        templates: action.payload.templates,
+        historyLogs: action.payload.historyLogs,
+      };
+
     default:
       return state;
   }
@@ -290,6 +302,8 @@ function reducer(state: FlightState, action: Action): FlightState {
 // ─── Context ────────────────────────────────────────────────
 interface FlightContextValue {
   state: FlightState;
+  viewMode: DashboardViewMode;
+  setViewMode: (mode: DashboardViewMode) => void;
   compileAndStartRun: (id: string, isTemplate: boolean) => void;
   toggleStep: (stepId: string) => void;
   completeRun: () => void;
@@ -304,6 +318,8 @@ interface FlightContextValue {
   ) => Promise<void>;
   deleteTemplate: (templateId: string) => Promise<void>;
   deleteCollection: (collectionId: string) => Promise<void>;
+  exportData: () => Promise<string>;
+  importData: (jsonStr: string) => Promise<boolean>;
 }
 
 const FlightContext = createContext<FlightContextValue | null>(null);
@@ -311,6 +327,19 @@ const FlightContext = createContext<FlightContextValue | null>(null);
 // ─── Provider ───────────────────────────────────────────────
 export function FlightManualProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [viewMode, setViewModeState] = useState<DashboardViewMode>('list');
+
+  // Hydrate view mode from storage
+  useEffect(() => {
+    (async () => {
+      try {
+        const savedViewMode = await safeGetItem<DashboardViewMode>(KEYS.viewMode, 'list');
+        setViewModeState(savedViewMode);
+      } catch (e) {
+        console.error('[FlightManual] Failed to load view mode:', e);
+      }
+    })();
+  }, []);
 
   // Hydrate with safe AsyncStorage fallback
   useEffect(() => {
@@ -363,6 +392,96 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, [state.collections, state.templates, state.activeRun, state.historyLogs, state.isLoading]);
+
+  // ─── View Mode Management ─────────────────────────────────
+  const setViewMode = useCallback(async (mode: DashboardViewMode) => {
+    setViewModeState(mode);
+    try {
+      await safeSetItem(KEYS.viewMode, mode);
+    } catch (e) {
+      console.error('[FlightManual] Failed to persist view mode:', e);
+    }
+  }, []);
+
+  // ─── Export/Import Data Management ────────────────────────
+  const exportData = useCallback(async (): Promise<string> => {
+    const backup: FlightManualBackup = {
+      version: '8.1.0',
+      exportedAt: Date.now(),
+      collections: state.collections,
+      templates: state.templates,
+      historyLogs: state.historyLogs,
+    };
+    return JSON.stringify(backup, null, 2);
+  }, [state.collections, state.templates, state.historyLogs]);
+
+  const importData = useCallback(async (jsonStr: string): Promise<boolean> => {
+    try {
+      // Parse the JSON string
+      const parsed = JSON.parse(jsonStr) as unknown;
+
+      // Validate the structure
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Invalid JSON: not an object');
+      }
+
+      const backup = parsed as FlightManualBackup;
+
+      // Validate required fields
+      if (!backup.version || typeof backup.version !== 'string') {
+        throw new Error('Invalid backup: missing or invalid version');
+      }
+
+      if (!Array.isArray(backup.collections)) {
+        throw new Error('Invalid backup: collections must be an array');
+      }
+
+      if (!Array.isArray(backup.templates)) {
+        throw new Error('Invalid backup: templates must be an array');
+      }
+
+      if (!Array.isArray(backup.historyLogs)) {
+        throw new Error('Invalid backup: historyLogs must be an array');
+      }
+
+      // Validate collection structure
+      for (const col of backup.collections) {
+        if (!col.id || !col.name || !Array.isArray(col.steps)) {
+          throw new Error('Invalid backup: malformed collection data');
+        }
+      }
+
+      // Validate template structure
+      for (const tpl of backup.templates) {
+        if (!tpl.id || !tpl.title || !Array.isArray(tpl.templateIds)) {
+          throw new Error('Invalid backup: malformed template data');
+        }
+      }
+
+      // Update the store state
+      dispatch({
+        type: 'REPLACE_ALL_DATA',
+        payload: {
+          collections: backup.collections,
+          templates: backup.templates,
+          historyLogs: backup.historyLogs,
+        },
+      });
+
+      // Persist to AsyncStorage
+      await Promise.all([
+        safeSetItem(KEYS.collections, backup.collections),
+        safeSetItem(KEYS.templates, backup.templates),
+        safeSetItem(KEYS.runLogs, backup.historyLogs),
+      ]);
+
+      console.log('[FlightManual] Data import successful');
+      return true;
+    } catch (error) {
+      console.error('[FlightManual] Import failed:', error);
+      return false;
+    }
+  }, []);
 
   // ─── Actions ──────────────────────────────────────────────
   const compileAndStartRun = useCallback(
@@ -571,6 +690,8 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     <FlightContext.Provider
       value={{
         state,
+        viewMode,
+        setViewMode,
         compileAndStartRun,
         toggleStep,
         completeRun,
@@ -579,6 +700,8 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         saveCustomCollection,
         deleteTemplate,
         deleteCollection,
+        exportData,
+        importData,
       }}
     >
       {children}

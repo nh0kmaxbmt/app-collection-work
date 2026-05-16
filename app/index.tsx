@@ -1,4 +1,4 @@
-// app/index.tsx — V8.0 Optimized Dashboard (Clean Rows, Settings Link, Fixed Spacing)
+// app/index.tsx — V8.2 Dashboard with Enhanced Cloud View
 import { useState, useMemo } from 'react';
 import { Stack } from 'expo-router';
 import {
@@ -19,7 +19,7 @@ import type { Collection, Template } from '../src/core/types';
 type SortMode = 'recent' | 'used';
 
 export default function Dashboard() {
-  const { state, compileAndStartRun, deleteTemplate, deleteCollection } = useFlightManual();
+  const { state, compileAndStartRun, deleteTemplate, deleteCollection, viewMode } = useFlightManual();
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [search, setSearch] = useState('');
 
@@ -137,6 +137,13 @@ export default function Dashboard() {
     paddingTop: 8,
   };
 
+  // Cloud view scroll content style
+  const cloudScrollContentStyle = {
+    paddingBottom: insets.bottom + 120,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  };
+
   // Helper text container style with safe area padding - positioned absolutely above nav bar
   const helperTextStyle = {
     position: 'absolute' as const,
@@ -148,6 +155,90 @@ export default function Dashboard() {
 
   // Adaptive styles object
   const styles = getStyles(isDark);
+
+  // Render cloud tag mode - Enhanced with gorgeous capsule cards
+  const renderCloudMode = () => (
+    <View style={styles.cloudContainer}>
+      {sortedCollections.map((col) => (
+        <Pressable
+          key={col.id}
+          onPress={() => handleLaunchCollection(col.id)}
+          onLongPress={() => handleDeleteCollection(col)}
+          style={({ pressed }) => [
+            styles.cloudPill,
+            isDark ? styles.cloudPillDark : styles.cloudPillLight,
+            pressed && styles.cloudPillPressed,
+          ]}
+        >
+          <View style={styles.cloudPillContent}>
+            <Text style={isDark ? styles.cloudPillNameDark : styles.cloudPillNameLight}>
+              {col.name}
+            </Text>
+            <Text style={isDark ? styles.cloudPillCountDark : styles.cloudPillCountLight}>
+              ({col.steps.length})
+            </Text>
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  );
+
+  // Render list mode
+  const renderListMode = () => (
+    <>
+      {/* Templates Section */}
+      {sortedTemplates.length > 0 && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Saved Routines</Text>
+          {sortedTemplates.map((tpl) => (
+            <Pressable
+              key={tpl.id}
+              onPress={() => handleLaunchTemplate(tpl.id)}
+              onLongPress={() => handleDeleteTemplate(tpl)}
+              style={({ pressed }) => [
+                styles.card,
+                pressed && styles.cardPressed,
+              ]}
+            >
+              <Text style={styles.cardTitle}>
+                {tpl.title} ({tpl.templateIds.length} collection{tpl.templateIds.length !== 1 ? 's' : ''})
+              </Text>
+              {tpl.description && (
+                <Text style={styles.cardMetadata}>
+                  {tpl.description}
+                </Text>
+              )}
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      {/* Collections Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Collections</Text>
+        {sortedCollections.map((col) => (
+          <Pressable
+            key={col.id}
+            onPress={() => handleLaunchCollection(col.id)}
+            onLongPress={() => handleDeleteCollection(col)}
+            style={({ pressed }) => [
+              styles.card,
+              pressed && styles.cardPressed,
+            ]}
+          >
+            <Text style={styles.cardTitle}>
+              {col.name} ({col.steps.length} steps)
+            </Text>
+            {(col.description || col.tags.length > 0) && (
+              <Text style={styles.cardMetadata}>
+                {formatMetadataLine(col.description, col.tags)}
+              </Text>
+            )}
+          </Pressable>
+        ))}
+      </View>
+    </>
+  );
 
   return (
     <>
@@ -173,7 +264,7 @@ export default function Dashboard() {
         }}
       />
 
-      {/* Main Container - flex-1 bg-zinc-50 dark:bg-zinc-950 */}
+      {/* Main Container */}
       <View style={styles.container}>
         {/* Search Bar */}
         <View style={styles.searchWrapper}>
@@ -184,12 +275,12 @@ export default function Dashboard() {
               placeholder="Search collections and routines..."
               value={search}
               onChangeText={setSearch}
-              autoFocus
+              autoFocus={false}
             />
           </View>
         </View>
 
-        {/* Segment Selector Bar - flex-row bg-zinc-100 dark:bg-zinc-900/80 p-1 rounded-xl mb-4 mx-2 */}
+        {/* Segment Selector Bar */}
         <View style={styles.segmentWrapper}>
           <View style={styles.segmentBackground}>
             {/* Most Recent Tab */}
@@ -230,110 +321,17 @@ export default function Dashboard() {
           </View>
         </View>
 
-        {/* Scrollable Content - flex-1 with contentContainerStyle padding */}
+        {/* Scrollable Content */}
         <ScrollView
           style={styles.scrollContent}
-          contentContainerStyle={scrollContentContainerStyle}
+          contentContainerStyle={viewMode === 'cloud' ? cloudScrollContentStyle : scrollContentContainerStyle}
           showsVerticalScrollIndicator={false}
         >
-          {/* Templates Section */}
-          {sortedTemplates.length > 0 && (
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Saved Routines</Text>
-              {sortedTemplates.map((tpl) => (
-                <Pressable
-                  key={tpl.id}
-                  onPress={() => handleLaunchTemplate(tpl.id)}
-                  onLongPress={() => handleDeleteTemplate(tpl)}
-                  style={({ pressed }) => [
-                    styles.card,
-                    pressed && styles.cardPressed,
-                  ]}
-                >
-                  {/* Line 1: Title with collection count - NO execution mode label */}
-                  <Text style={styles.cardTitle}>
-                    {tpl.title} ({tpl.templateIds.length} collection{tpl.templateIds.length !== 1 ? 's' : ''})
-                  </Text>
-                  {/* Line 2: Description */}
-                  {tpl.description && (
-                    <Text style={styles.cardMetadata}>
-                      {tpl.description}
-                    </Text>
-                  )}
-                </Pressable>
-              ))}
-            </View>
-          )}
-
-          {/* Collections Section */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Collections</Text>
-            {sortedCollections.map((col, idx) => (
-              <View
-                key={col.id}
-                style={{
-                  // Add vertical padding only BETWEEN cards, responsive for different screens
-                  marginTop: idx !== 0 ? 12 : 0,
-                  // Responsive: use percentage or min/max for spacing on larger screens if needed
-                  // This is a compromise for RN - most lists just use px
-                  // On larger screens, "12" can be scaled as needed, see below for style example
-                }}
-              >
-                <Pressable
-                  onPress={() => handleLaunchCollection(col.id)}
-                  onLongPress={() => handleDeleteCollection(col)}
-                  style={({ pressed }) => [
-                    styles.card,
-                    pressed && styles.cardPressed,
-                    // Responsive card minHeight for larger screens
-                    { minHeight: 64 }
-                  ]}
-                >
-                  {/* Keep name and description close with responsive gap */}
-                  <View>
-                    <Text
-                      style={[
-                        styles.cardTitle,
-                        // Responsive font size based on screen width
-                        {
-                          fontSize:
-                            // @ts-ignore
-                            typeof window !== 'undefined' && window.innerWidth > 600
-                              ? 19
-                              : 16,
-                        },
-                      ]}
-                    >
-                      {col.name} ({col.steps.length} steps)
-                    </Text>
-                    {(col.description || col.tags.length > 0) && (
-                      <Text
-                        style={[
-                          styles.cardMetadata,
-                          // Responsive font and margin
-                          {
-                            marginTop: 3,
-                            fontSize:
-                              // @ts-ignore
-                              typeof window !== 'undefined' && window.innerWidth > 600
-                                ? 15
-                                : 13,
-                          },
-                        ]}
-                        numberOfLines={2}
-                        ellipsizeMode="tail"
-                      >
-                        {formatMetadataLine(col.description, col.tags)}
-                      </Text>
-                    )}
-                  </View>
-                </Pressable>
-              </View>
-            ))}
-          </View>
+          {/* Render based on view mode */}
+          {viewMode === 'list' ? renderListMode() : renderCloudMode()}
         </ScrollView>
 
-        {/* FAB - Positioned absolutely outside ScrollView */}
+        {/* FAB */}
         <Pressable
           onPress={() => router.push('/create-collection' as any)}
           style={{ position: 'absolute', bottom: insets.bottom + 20, right: 24 }}
@@ -343,7 +341,7 @@ export default function Dashboard() {
           </View>
         </Pressable>
 
-        {/* Helper Text - Positioned with Safe Area padding to prevent clipping by nav bar */}
+        {/* Helper Text */}
         <View style={helperTextStyle}>
           <Text style={styles.hintText}>Tap to launch · Long press to delete</Text>
         </View>
@@ -433,7 +431,7 @@ function getStyles(isDark: boolean) {
       color: isDark ? '#a1a1aa' : '#71717a',
     },
 
-    // Scroll content - flex-1
+    // Scroll content
     scrollContent: {
       flex: 1,
     },
@@ -451,7 +449,73 @@ function getStyles(isDark: boolean) {
       color: isDark ? '#818cf8' : '#3b82f6',
     },
 
-    // Card styles - Updated with mb-4 spacing equivalent
+    // Cloud container - flex-row flex-wrap gap-2.5 p-4
+    cloudContainer: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+      padding: 16,
+    },
+
+    // Cloud pill - gorgeous tactile capsule card
+    cloudPillLight: {
+      backgroundColor: '#ffffff',
+      borderWidth: 1,
+      borderColor: '#e4e4e7',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.08,
+      shadowRadius: 3,
+      elevation: 2,
+    },
+    cloudPillDark: {
+      backgroundColor: '#18181b',
+      borderWidth: 1,
+      borderColor: 'rgba(39, 39, 42, 0.8)',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.15,
+      shadowRadius: 3,
+      elevation: 2,
+    },
+    cloudPill: {
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+      borderRadius: 12,
+    },
+    cloudPillPressed: {
+      transform: [{ scale: 0.95 }],
+    },
+    cloudPillContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    // text-sm font-semibold text-zinc-800 dark:text-zinc-200
+    cloudPillNameLight: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#27272a',
+    },
+    cloudPillNameDark: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: '#e4e4e7',
+    },
+    // text-xs font-bold text-blue-600 dark:text-blue-400 ml-1.5
+    cloudPillCountLight: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#2563eb',
+      marginLeft: 6,
+    },
+    cloudPillCountDark: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#60a5fa',
+      marginLeft: 6,
+    },
+
+    // Card styles
     card: {
       backgroundColor: isDark ? '#18181b' : '#ffffff',
       borderRadius: 16,
@@ -470,7 +534,7 @@ function getStyles(isDark: boolean) {
       transform: [{ scale: 0.99 }],
     },
 
-    // Card title - text-base font-bold text-zinc-900 dark:text-zinc-100
+    // Card title
     cardTitle: {
       fontSize: 16,
       fontWeight: '700',
@@ -478,7 +542,7 @@ function getStyles(isDark: boolean) {
       marginBottom: 4,
     },
 
-    // Card metadata - text-sm text-zinc-500 dark:text-zinc-400 mt-0.5
+    // Card metadata
     cardMetadata: {
       fontSize: 14,
       color: isDark ? '#a1a1aa' : '#71717a',
@@ -506,7 +570,7 @@ function getStyles(isDark: boolean) {
       lineHeight: 36,
     },
 
-    // Hint text - text-xs font-medium text-zinc-400 dark:text-zinc-500
+    // Hint text
     hintText: {
       fontSize: 12,
       fontWeight: '500',

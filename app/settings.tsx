@@ -1,4 +1,4 @@
-// app/settings.tsx — V8.0 Settings Module with Theme Toggle
+// app/settings.tsx — V8.2 Native File System Backup/Restore
 import { useState } from 'react';
 import { Stack } from 'expo-router';
 import {
@@ -9,15 +9,24 @@ import {
   StyleSheet,
   useColorScheme,
   Appearance,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
+import { useFlightManual } from '../src/core/store';
+import type { DashboardViewMode } from '../src/core/types';
 
 type ThemeMode = 'light' | 'dark' | 'system';
 
 export default function Settings() {
   const systemColorScheme = useColorScheme();
   const [themeMode, setThemeMode] = useState<ThemeMode>('system');
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const { viewMode, setViewMode, exportData, importData } = useFlightManual();
 
   const isDark = systemColorScheme === 'dark';
   const insets = useSafeAreaInsets();
@@ -35,14 +44,105 @@ export default function Settings() {
     }
   };
 
-  const getThemeLabel = (mode: ThemeMode): string => {
-    switch (mode) {
-      case 'light':
-        return 'Light';
-      case 'dark':
-        return 'Dark';
-      case 'system':
-        return 'System';
+  const handleViewModeChange = (mode: DashboardViewMode) => {
+    setViewMode(mode);
+  };
+
+  // Export using native file system and share sheet
+  const handleExport = async () => {
+    if (isExporting) return;
+
+    try {
+      setIsExporting(true);
+
+      // Get the JSON data from store
+      const jsonData = await exportData();
+
+      // Write to a temporary file in the cache directory
+      const fileName = `flymanual_backup_${new Date().toISOString().split('T')[0]}.json`;
+      const fileUri = FileSystem.cacheDirectory + fileName;
+
+      await FileSystem.writeAsStringAsync(fileUri, jsonData);
+
+      // Check if sharing is available
+      const isAvailable = await Sharing.isAvailableAsync();
+
+      if (!isAvailable) {
+        Alert.alert(
+          'Sharing Not Available',
+          'Your device does not support file sharing. The backup has been saved to the app cache.',
+        );
+        return;
+      }
+
+      // Open the native share sheet
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/json',
+        dialogTitle: 'Export FlyManual Backup',
+      });
+
+      Alert.alert(
+        'Export Successful',
+        'Your backup has been shared. Save it to a secure location.',
+      );
+    } catch (error) {
+      console.error('[Settings] Export failed:', error);
+      Alert.alert(
+        'Export Failed',
+        'Could not create or share the backup file. Please try again.',
+      );
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  // Import using native document picker
+  const handleImport = async () => {
+    if (isImporting) return;
+
+    try {
+      setIsImporting(true);
+
+      // Open the document picker for JSON files
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true,
+      });
+
+      // User canceled the picker
+      if (result.canceled) {
+        setIsImporting(false);
+        return;
+      }
+
+      // Get the file URI from the picked asset
+      const fileUri = result.assets[0].uri;
+
+      // Read the file contents
+      const fileContent = await FileSystem.readAsStringAsync(fileUri);
+
+      // Validate and import the data
+      const success = await importData(fileContent);
+
+      if (success) {
+        Alert.alert(
+          'Import Successful',
+          'Your collections and templates have been restored from the backup.',
+        );
+      } else {
+        Alert.alert(
+          'Import Failed',
+          'The backup file is invalid or corrupted. Please ensure it is a valid FlyManual backup JSON file.',
+        );
+      }
+    } catch (error) {
+      console.error('[Settings] Import failed:', error);
+      Alert.alert(
+        'Import Failed',
+        'Could not read the selected file. Please ensure it is a valid JSON file.',
+      );
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -81,7 +181,6 @@ export default function Settings() {
 
             {/* Theme Mode Selector */}
             <View style={styles.optionGroup}>
-         
               {/* Light Mode Option */}
               <Pressable
                 onPress={() => handleThemeChange('light')}
@@ -160,7 +259,122 @@ export default function Settings() {
                 </View>
               </Pressable>
             </View>
-       
+          </View>
+
+          {/* Dashboard Layout Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Dashboard Layout</Text>
+
+            <View style={styles.optionGroup}>
+              {/* Vertical List Option */}
+              <Pressable
+                onPress={() => handleViewModeChange('list')}
+                style={[
+                  styles.optionRow,
+                  viewMode === 'list' && styles.optionRowActive,
+                ]}
+              >
+                <View style={styles.optionTextContainer}>
+                  <Text
+                    style={[
+                      styles.optionTitle,
+                      viewMode === 'list' && styles.optionTitleActive,
+                    ]}
+                  >
+                    Vertical List
+                  </Text>
+                  <Text style={styles.optionDescription}>
+                    Full card details with descriptions
+                  </Text>
+                </View>
+                <View style={[styles.radioCircle, viewMode === 'list' && styles.radioCircleActive]}>
+                  {viewMode === 'list' && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+
+              {/* Compact Cloud Tag Option */}
+              <Pressable
+                onPress={() => handleViewModeChange('cloud')}
+                style={[
+                  styles.optionRow,
+                  viewMode === 'cloud' && styles.optionRowActive,
+                ]}
+              >
+                <View style={styles.optionTextContainer}>
+                  <Text
+                    style={[
+                      styles.optionTitle,
+                      viewMode === 'cloud' && styles.optionTitleActive,
+                    ]}
+                  >
+                    Compact Cloud
+                  </Text>
+                  <Text style={styles.optionDescription}>
+                    Dense tag grid for quick access
+                  </Text>
+                </View>
+                <View style={[styles.radioCircle, viewMode === 'cloud' && styles.radioCircleActive]}>
+                  {viewMode === 'cloud' && <View style={styles.radioDot} />}
+                </View>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Data Management Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Data Management</Text>
+
+            <View style={styles.optionGroup}>
+              {/* Export Button */}
+              <Pressable
+                onPress={handleExport}
+                disabled={isExporting}
+                style={[styles.actionButton, isExporting && styles.actionButtonDisabled]}
+              >
+                <View style={styles.actionButtonContent}>
+                  <Text style={styles.actionButtonText}>
+                    {isExporting ? 'Exporting...' : 'Export JSON Backup'}
+                  </Text>
+                  <Text style={styles.actionButtonSubtext}>
+                    {isExporting
+                      ? 'Creating backup file...'
+                      : 'Generate and share a backup of all your collections'}
+                  </Text>
+                </View>
+              </Pressable>
+
+              {/* Import Button */}
+              <Pressable
+                onPress={handleImport}
+                disabled={isImporting}
+                style={[
+                  styles.actionButton,
+                  styles.actionButtonSecondary,
+                  isImporting && styles.actionButtonDisabled,
+                ]}
+              >
+                <View style={styles.actionButtonContent}>
+                  <Text
+                    style={[
+                      styles.actionButtonText,
+                      styles.actionButtonTextSecondary,
+                    ]}
+                  >
+                    {isImporting ? 'Importing...' : 'Import JSON Backup'}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.actionButtonSubtext,
+                      styles.actionButtonSubtextSecondary,
+                    ]}
+                  >
+                    {isImporting
+                      ? 'Restoring from file...'
+                      : 'Restore collections from a backup file'}
+                  </Text>
+                </View>
+              </Pressable>
+            </View>
           </View>
 
           {/* About Section */}
@@ -170,11 +384,27 @@ export default function Settings() {
             <View style={styles.infoGroup}>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Version</Text>
-                <Text style={styles.infoValue}>8.0.0</Text>
+                <Text style={styles.infoValue}>8.2.0</Text>
               </View>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Build</Text>
                 <Text style={styles.infoValue}>Production</Text>
+              </View>
+              <View style={styles.infoRowLast}>
+                <Text style={styles.infoLabel}>View Mode</Text>
+                <Text style={styles.infoValue}>{viewMode === 'list' ? 'Vertical List' : 'Compact Cloud'}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* File System Info */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Storage</Text>
+
+            <View style={styles.infoGroup}>
+              <View style={styles.infoRowLast}>
+                <Text style={styles.infoLabel}>Backup Format</Text>
+                <Text style={styles.infoValue}>JSON (Native File System)</Text>
               </View>
             </View>
           </View>
@@ -264,6 +494,37 @@ function getStyles(isDark: boolean, insets: { bottom: number }) {
       borderRadius: 6,
       backgroundColor: isDark ? '#60a5fa' : '#3b82f6',
     },
+    actionButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 16,
+      borderBottomWidth: 1,
+      borderBottomColor: isDark ? '#27272a' : '#f4f4f5',
+    },
+    actionButtonSecondary: {
+      borderBottomWidth: 0,
+    },
+    actionButtonDisabled: {
+      opacity: 0.5,
+    },
+    actionButtonContent: {
+      flexDirection: 'column',
+    },
+    actionButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: isDark ? '#60a5fa' : '#3b82f6',
+      marginBottom: 4,
+    },
+    actionButtonTextSecondary: {
+      color: isDark ? '#a78bfa' : '#7c3aed',
+    },
+    actionButtonSubtext: {
+      fontSize: 13,
+      color: isDark ? '#71717a' : '#a1a1aa',
+    },
+    actionButtonSubtextSecondary: {
+      color: isDark ? '#71717a' : '#a1a1aa',
+    },
     infoGroup: {
       backgroundColor: isDark ? '#18181b' : '#ffffff',
       borderRadius: 16,
@@ -279,6 +540,13 @@ function getStyles(isDark: boolean, insets: { bottom: number }) {
       paddingVertical: 12,
       borderBottomWidth: 1,
       borderBottomColor: isDark ? '#27272a' : '#f4f4f5',
+    },
+    infoRowLast: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 12,
     },
     infoLabel: {
       fontSize: 15,
