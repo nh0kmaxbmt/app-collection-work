@@ -2,44 +2,36 @@
 import type { Template, RunLog } from './types';
 
 /**
- * Scores each template based on how often it has been run within a +/- 2-hour
- * window of the current time. Returns templates sorted by score descending.
+ * Scores templates by how often they've been run within a +/- 2-hour window
+ * of the current time. Returns templates sorted by score (descending).
  *
- * Scoring rules:
- *  - Only the most recent 10 logs are considered.
- *  - Each log that falls within a +/- 2-hour window of the current hour
- *    contributes +1 to that template's score.
- *  - Templates with no matching logs receive a score of 0.
+ * Fallback: if no logs exist, returns templates in their original order.
  */
 export function getWeightedTemplates(
   templates: Template[],
   logs: RunLog[],
 ): Template[] {
-  const now = new Date();
-  const currentHour = now.getHours();
+  if (logs.length === 0) return templates;
 
-  // Take the most recent 10 logs
-  const recentLogs = logs.slice(-10);
+  const currentHour = new Date().getHours();
 
-  // Build a score map: templateId -> number
+  // Build score map: templateId -> number
   const scores = new Map<string, number>();
 
-  for (const log of recentLogs) {
-    const logDate = new Date(log.timestamp);
-    const logHour = logDate.getHours();
+  for (const log of logs) {
+    const logHour = new Date(log.timestamp).getHours();
 
-    // Check if log falls within +/- 2 hours of current time
+    // Calculate hour difference with wrap-around handling
     const hourDiff = Math.abs(currentHour - logHour);
-    // Handle wrap-around (e.g., 23 vs 1)
     const wrappedDiff = Math.min(hourDiff, 24 - hourDiff);
 
     if (wrappedDiff <= 2) {
-      const current = scores.get(log.templateId) ?? 0;
-      scores.set(log.templateId, current + 1);
+      const prev = scores.get(log.templateId) ?? 0;
+      scores.set(log.templateId, prev + 1);
     }
   }
 
-  // Sort templates: higher score first, stable sort for equal scores
+  // Stable sort: higher score first
   return [...templates].sort((a, b) => {
     const scoreA = scores.get(a.id) ?? 0;
     const scoreB = scores.get(b.id) ?? 0;

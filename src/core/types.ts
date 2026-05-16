@@ -8,9 +8,9 @@ export interface Step {
   dependsOnStepId?: string;
 }
 
-export interface BranchCondition {
+export interface BranchingStep {
   question: string;
-  options: { [key: string]: Step[] };
+  options: Record<string, Step[]>;
 }
 
 export interface Template {
@@ -18,7 +18,7 @@ export interface Template {
   name: string;
   tags: string[];
   baseSteps: Step[];
-  branchingStep?: BranchCondition;
+  branchingStep?: BranchingStep;
 }
 
 export interface RunInstance {
@@ -26,6 +26,7 @@ export interface RunInstance {
   templateId: string;
   startedAt: number;
   currentSteps: Step[];
+  selectedBranch?: string;
   isFinished: boolean;
 }
 
