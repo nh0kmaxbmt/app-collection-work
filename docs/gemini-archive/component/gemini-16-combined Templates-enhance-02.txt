@@ -1,0 +1,31 @@
+System Role: You are a Principal Systems Architect and Lead React Native Developer. You write bulletproof, clean, strictly typed TypeScript using Expo Router, NativeWind, and AsyncStorage.
+
+Context:
+We are refactoring "FlightManual" into its definitive V6 "Mid-Flight Composable Pipeline" architecture based on real-world usage optimization metrics. We are dropping up-front queue planners on the dashboard. Selection actions now trigger an absolute 1-Tap Direct Launch immediately into the execution view. Once inside the execution environment, users can optionally inject secondary workflows mid-flight. Furthermore, the dashboard now tracks and sorts items using a fluid animated slider tracking "Most Recent" vs. "Most Used" parameters.
+
+Your Tasks:
+
+1. Rewrite Core Types Engine (src/core/types.ts):
+- Define lean interfaces:
+  - 'Step' (id, text, isCompleted, isLocked, dependsOnStepId)
+  - 'Collection' (id, name, description, tags, executionMode: 'linear' | 'parallel', steps: Step[])
+  - 'Template' (id, title, description, templateIds: string[])
+  - 'RunInstance' (id, startedAt, currentSteps: (Step & { parentTemplateName: string; executionMode: string })[], isFinished: boolean)
+
+2. Implement Mid-Flight Modifications In Data Core (src/core/store.ts):
+- Secure state persistence configurations using AsyncStorage keys: 'flightmanual::collections' and 'flightmanual::templates'. Fix the hydration overwrite bug permanently.
+- Provide 'compileAndStartRun(id: string, isTemplate: boolean)' to directly populate 'activeRun' state on a single tap.
+- Implement 'appendCollectionToActiveRun(collectionId: string)': Deep-clones target collection steps and pushes them into the active currentSteps running list array natively. If the collection is 'linear', only unlock its first nested task, locking the rest down sequentially.
+- Implement 'saveActiveRunAsTemplate(title: string, description: string)' to turn a combined live run layout into a permanent structural Template entry.
+
+3. Refactor Dashboard Layout With Sliding Filter (app/index.tsx):
+- Remove the up-front queue tray. Tapping a list row immediately calls 'compileAndStartRun' and redirects the route to 'app/flight-deck'.
+- Add a high-contrast sliding toggle selector bar: [ Most Recent | Most Used ]. Implement layout filtering sorting logic: "Most Recent" matches creation order; "Most Used" references historical logs array counts to bubble top routines up.
+
+4. Build Dynamic Execution Deck (app/flight-deck.tsx):
+- Render the split viewports: "🔥 NOW ACTIVE" vs "⏳ NEXT UP".
+- Add an text action link or button at the base layout: "[+ Append Collection to Run]". Clicking opens an overlay selection card calling 'appendCollectionToActiveRun()'.
+- Add a conditional check: Evaluate the unique parent collection names in active steps. If count > 1, render a solid, custom blue saving button layout prompting an overlay modal to invoke 'saveActiveRunAsTemplate()'.
+
+Deliverable Constraints:
+Provide the absolute complete, unbroken file code configurations for: 'src/core/types.ts', 'src/core/store.ts', 'app/index.tsx', and 'app/flight-deck.tsx'. Do not use placeholder cut shortcomments or ellipsis shortcuts.

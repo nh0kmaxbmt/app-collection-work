@@ -1,49 +1,118 @@
-// src/core/store.tsx — V3 Multi-Select Engine
+// src/core/store.tsx — V6.1 Mid-Flight Composable Pipeline (Immutable & Storage-Safe)
 import { createContext, useContext, useReducer, useEffect, useCallback, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Template, RunInstance, RunLog, Step } from './types';
+import type {
+  Collection,
+  Template,
+  RunInstance,
+  RunLog,
+  Step,
+  CompiledStep,
+  ExecutionMode,
+} from './types';
 
 const KEYS = {
+  collections: 'flightmanual::collections',
   templates: 'flightmanual::templates',
   activeRun: 'flightmanual::active_run',
   runLogs: 'flightmanual::run_logs',
 } as const;
 
 // ─── Seed data ──────────────────────────────────────────────
-const SEED_TEMPLATES: Template[] = [
+const SEED_COLLECTIONS: Collection[] = [
   {
-    id: 'tpl_gym_prep',
+    id: 'col_gym_prep',
     name: 'Gym Session Prep',
+    description: 'Standard pre-workout preparation routine',
     tags: ['fitness', 'daily'],
-    baseSteps: [
+    executionMode: 'linear',
+    steps: [
       { id: 'step_1', text: 'Fill up 1.5L water bottle', isCompleted: false, isLocked: false },
       { id: 'step_2', text: 'Pack lifting belt and clean towel into gym bag', isCompleted: false, isLocked: true, dependsOnStepId: 'step_1' },
       { id: 'step_3', text: 'Verify wireless headphones are charged > 50%', isCompleted: false, isLocked: true, dependsOnStepId: 'step_2' },
+      { id: 'step_4', text: 'Put on workout shoes and tie laces', isCompleted: false, isLocked: true, dependsOnStepId: 'step_3' },
+      { id: 'step_5', text: 'Grab pre-workout snack if needed', isCompleted: false, isLocked: true, dependsOnStepId: 'step_4' },
     ],
-    branchingStep: {
-      question: 'What focus group are we destroying today?',
-      options: {
-        legs: [
-          { id: 'branch_leg_1', text: 'Pre-pack squat shoes and knee sleeves', isCompleted: false, isLocked: true, dependsOnStepId: 'step_3' },
-          { id: 'branch_leg_2', text: 'Consume non-stimulant pre-workout pump formula', isCompleted: false, isLocked: true, dependsOnStepId: 'branch_leg_1' },
-        ],
-        core: [
-          { id: 'branch_core_1', text: 'Roll out yoga mat and grab resistance bands', isCompleted: false, isLocked: true, dependsOnStepId: 'step_3' },
-          { id: 'branch_core_2', text: 'Take multi-vitamin dose with light carb snack', isCompleted: false, isLocked: true, dependsOnStepId: 'branch_core_1' },
-        ],
-      },
-    },
+  },
+  {
+    id: 'col_leg_day',
+    name: 'Leg Day Extras',
+    description: 'Additional items for lower body focus sessions',
+    tags: ['fitness', 'legs'],
+    executionMode: 'linear',
+    steps: [
+      { id: 'step_leg_1', text: 'Pack knee sleeves', isCompleted: false, isLocked: false },
+      { id: 'step_leg_2', text: 'Pack lifting belt (heavier weight expected)', isCompleted: false, isLocked: true, dependsOnStepId: 'step_leg_1' },
+      { id: 'step_leg_3', text: 'Bring foam roller for post-workout', isCompleted: false, isLocked: true, dependsOnStepId: 'step_leg_2' },
+    ],
+  },
+  {
+    id: 'col_upper_body',
+    name: 'Upper Body Focus',
+    description: 'Items for push and pull day sessions',
+    tags: ['fitness', 'upper'],
+    executionMode: 'linear',
+    steps: [
+      { id: 'step_upper_1', text: 'Pack lifting straps', isCompleted: false, isLocked: false },
+      { id: 'step_upper_2', text: 'Pack wrist wraps', isCompleted: false, isLocked: true, dependsOnStepId: 'step_upper_1' },
+      { id: 'step_upper_3', text: 'Bring chalk if gym allows', isCompleted: false, isLocked: true, dependsOnStepId: 'step_upper_2' },
+    ],
+  },
+  {
+    id: 'col_grocery_list',
+    name: 'Grocery List',
+    description: 'Weekly grocery shopping essentials',
+    tags: ['errands', 'shopping', 'weekly'],
+    executionMode: 'parallel',
+    steps: [
+      { id: 'step_g1', text: 'Get shopping bags', isCompleted: false, isLocked: false },
+      { id: 'step_g2', text: 'Buy milk', isCompleted: false, isLocked: false },
+      { id: 'step_g3', text: 'Buy eggs', isCompleted: false, isLocked: false },
+      { id: 'step_g4', text: 'Buy bread', isCompleted: false, isLocked: false },
+      { id: 'step_g5', text: 'Buy coffee beans', isCompleted: false, isLocked: false },
+      { id: 'step_g6', text: 'Buy fresh produce', isCompleted: false, isLocked: false },
+    ],
+  },
+  {
+    id: 'col_bookstore',
+    name: 'Bookstore Run',
+    description: 'Library and bookstore errands',
+    tags: ['errands', 'reading'],
+    executionMode: 'linear',
+    steps: [
+      { id: 'step_b1', text: 'Locate library card', isCompleted: false, isLocked: false },
+      { id: 'step_b2', text: 'Grab book bag', isCompleted: false, isLocked: true, dependsOnStepId: 'step_b1' },
+      { id: 'step_b3', text: 'Check return due dates', isCompleted: false, isLocked: true, dependsOnStepId: 'step_b2' },
+    ],
+  },
+  {
+    id: 'col_coffee_shop',
+    name: 'Coffee Shop',
+    description: 'Cafe visit checklist',
+    tags: ['errands', 'food'],
+    executionMode: 'parallel',
+    steps: [
+      { id: 'step_c1', text: 'Bring reusable cup', isCompleted: false, isLocked: false },
+      { id: 'step_c2', text: 'Check loyalty app for rewards', isCompleted: false, isLocked: false },
+      { id: 'step_c3', text: 'Bring headphones for podcast', isCompleted: false, isLocked: false },
+    ],
   },
 ];
 
 const SEED_LOGS: RunLog[] = [
-  { templateId: 'tpl_gym_prep', timestamp: 1778950800000, durationMs: 420000 },
-  { templateId: 'tpl_gym_prep', timestamp: 1779037200000, durationMs: 380000 },
-  { templateId: 'tpl_gym_prep', timestamp: 1779123600000, durationMs: 510000 },
+  { collectionId: 'col_gym_prep', timestamp: 1778950800000, durationMs: 420000 },
+  { collectionId: 'col_gym_prep', timestamp: 1779037200000, durationMs: 380000 },
+  { collectionId: 'col_grocery_list', timestamp: 1779123600000, durationMs: 510000 },
+  { collectionId: 'col_gym_prep', timestamp: 1779210000000, durationMs: 400000 },
+  { collectionId: 'col_bookstore', timestamp: 1779213600000, durationMs: 180000 },
+  { collectionId: 'col_leg_day', timestamp: 1779296400000, durationMs: 450000 },
+  { collectionId: 'col_gym_prep', timestamp: 1779382800000, durationMs: 390000 },
+  { collectionId: 'col_grocery_list', timestamp: 1779386400000, durationMs: 480000 },
 ];
 
 // ─── State ──────────────────────────────────────────────────
 interface FlightState {
+  collections: Collection[];
   templates: Template[];
   activeRun: RunInstance | null;
   historyLogs: RunLog[];
@@ -52,17 +121,90 @@ interface FlightState {
 
 // ─── Actions ────────────────────────────────────────────────
 type Action =
-  | { type: 'HYDRATE'; payload: { templates: Template[]; activeRun: RunInstance | null; historyLogs: RunLog[] } }
+  | { type: 'HYDRATE'; payload: { collections: Collection[]; templates: Template[]; activeRun: RunInstance | null; historyLogs: RunLog[] } }
   | { type: 'START_RUN'; payload: RunInstance }
-  | { type: 'TOGGLE_BRANCH'; payload: { optionKey: string; branchSteps: Step[] } }
   | { type: 'TOGGLE_STEP'; payload: string }
   | { type: 'COMPLETE_RUN'; payload: RunLog }
-  | { type: 'SAVE_TEMPLATE'; payload: Template };
+  | { type: 'APPEND_STEPS'; payload: CompiledStep[] }
+  | { type: 'SAVE_TEMPLATE'; payload: Template }
+  | { type: 'SAVE_COLLECTION'; payload: Collection }
+  | { type: 'DELETE_TEMPLATE'; payload: string }
+  | { type: 'DELETE_COLLECTION'; payload: string };
 
-const initialState: FlightState = { templates: [], activeRun: null, historyLogs: [], isLoading: true };
+const initialState: FlightState = {
+  collections: [],
+  templates: [],
+  activeRun: null,
+  historyLogs: [],
+  isLoading: true,
+};
 
-function cloneSteps(steps: Step[]): Step[] {
-  return steps.map((s) => ({ ...s }));
+// ─── Helper: Safe AsyncStorage operations with fallback ─────
+async function safeGetItem<T>(key: string, fallback: T): Promise<T> {
+  try {
+    const value = await AsyncStorage.getItem(key);
+    if (value !== null) {
+      const parsed = JSON.parse(value);
+      return parsed as T;
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Native module is null') || message.includes('null is not an object')) {
+      console.warn(`[FlightManual] AsyncStorage unavailable for ${key}, using fallback`);
+    } else {
+      console.error(`[FlightManual] AsyncStorage.getItem(${key}) failed:`, error);
+    }
+  }
+  return fallback;
+}
+
+async function safeSetItem(key: string, value: unknown): Promise<void> {
+  try {
+    await AsyncStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Native module is null') || message.includes('null is not an object')) {
+      console.warn(`[FlightManual] AsyncStorage unavailable, skipping persist for ${key}`);
+    } else {
+      console.error(`[FlightManual] AsyncStorage.setItem(${key}) failed:`, error);
+    }
+  }
+}
+
+async function safeRemoveItem(key: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(key);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Native module is null') || message.includes('null is not an object')) {
+      console.warn(`[FlightManual] AsyncStorage unavailable, skipping remove for ${key}`);
+    } else {
+      console.error(`[FlightManual] AsyncStorage.removeItem(${key}) failed:`, error);
+    }
+  }
+}
+
+// ─── Immutable linear step unlock helper ───────────────────
+function unlockNextLinearStep(
+  steps: CompiledStep[],
+  completedStepId: string,
+  parentTemplateName: string
+): CompiledStep[] {
+  // Find all steps from the same parent collection
+  const siblingSteps = steps.filter(s => s.parentTemplateName === parentTemplateName);
+
+  // Find the completed step's index in the siblings
+  const completedIndex = siblingSteps.findIndex(s => s.id === completedStepId);
+  if (completedIndex === -1) return steps;
+
+  // Find the next step in the sequence (by original array order)
+  const nextStep = siblingSteps[completedIndex + 1];
+  if (!nextStep) return steps;
+
+  // Unlock the next step immutably
+  return steps.map(s =>
+    s.id === nextStep.id ? { ...s, isLocked: false } : s
+  );
 }
 
 // ─── Reducer ────────────────────────────────────────────────
@@ -74,68 +216,39 @@ function reducer(state: FlightState, action: Action): FlightState {
     case 'START_RUN':
       return { ...state, activeRun: action.payload };
 
-    case 'TOGGLE_BRANCH': {
-      if (!state.activeRun) return state;
-      const { optionKey, branchSteps } = action.payload;
-      const isSelected = state.activeRun.selectedBranches.includes(optionKey);
-
-      if (!isSelected) {
-        // Inject: append branch steps with branchSource set
-        const injected = cloneSteps(branchSteps).map((s) => ({
-          ...s,
-          branchSource: optionKey,
-          isLocked: true, // will unlock after dependency check below
-        }));
-        // Chain first injected step to last base step
-        const lastBaseStep = [...state.activeRun.currentSteps].reverse().find((s) => !s.branchSource);
-        if (lastBaseStep && injected.length > 0) {
-          injected[0].dependsOnStepId = lastBaseStep.id;
-        }
-        // Unlock first injected step if its dependency is already completed
-        if (injected.length > 0 && lastBaseStep?.isCompleted) {
-          injected[0].isLocked = false;
-        }
-        return {
-          ...state,
-          activeRun: {
-            ...state.activeRun,
-            selectedBranches: [...state.activeRun.selectedBranches, optionKey],
-            currentSteps: [...state.activeRun.currentSteps, ...injected],
-          },
-        };
-      } else {
-        // Remove: filter out steps from this branch
-        const filtered = state.activeRun.currentSteps.filter(
-          (s) => s.branchSource !== optionKey,
-        );
-        return {
-          ...state,
-          activeRun: {
-            ...state.activeRun,
-            selectedBranches: state.activeRun.selectedBranches.filter((k) => k !== optionKey),
-            currentSteps: filtered,
-          },
-        };
-      }
-    }
-
     case 'TOGGLE_STEP': {
       if (!state.activeRun) return state;
       const stepId = action.payload;
-      const steps = state.activeRun.currentSteps.map((s) =>
-        s.id === stepId ? { ...s, isCompleted: !s.isCompleted } : s,
+
+      // Find the step being toggled
+      const targetStep = state.activeRun.currentSteps.find(s => s.id === stepId);
+      if (!targetStep) return state;
+
+      // Calculate new completion state
+      const newIsCompleted = !targetStep.isCompleted;
+
+      // IMMUTABLE: Create brand new array with all steps as brand new objects
+      let newSteps = state.activeRun.currentSteps.map(step =>
+        step.id === stepId
+          ? { ...step, isCompleted: newIsCompleted }
+          : { ...step }
       );
-      // Unlock dependents when toggled ON
-      const toggled = steps.find((s) => s.id === stepId);
-      if (toggled?.isCompleted) {
-        for (let i = 0; i < steps.length; i++) {
-          if (steps[i].dependsOnStepId === stepId) {
-            steps[i] = { ...steps[i], isLocked: false };
-          }
-        }
+
+      // If step was just completed, unlock the next linear step in its sequence
+      if (newIsCompleted && targetStep.executionMode === 'linear') {
+        newSteps = unlockNextLinearStep(newSteps, stepId, targetStep.parentTemplateName);
       }
-      const allDone = steps.every((s) => s.isCompleted);
-      return { ...state, activeRun: { ...state.activeRun, currentSteps: steps, isFinished: allDone } };
+
+      const allDone = newSteps.every(s => s.isCompleted);
+
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun!,
+          currentSteps: newSteps,
+          isFinished: allDone
+        }
+      };
     }
 
     case 'COMPLETE_RUN':
@@ -145,8 +258,29 @@ function reducer(state: FlightState, action: Action): FlightState {
         historyLogs: [...state.historyLogs, action.payload],
       };
 
+    case 'APPEND_STEPS': {
+      if (!state.activeRun) return state;
+      return {
+        ...state,
+        activeRun: {
+          ...state.activeRun,
+          currentSteps: [...state.activeRun.currentSteps, ...action.payload],
+          isFinished: false,
+        },
+      };
+    }
+
     case 'SAVE_TEMPLATE':
       return { ...state, templates: [...state.templates, action.payload] };
+
+    case 'SAVE_COLLECTION':
+      return { ...state, collections: [...state.collections, action.payload] };
+
+    case 'DELETE_TEMPLATE':
+      return { ...state, templates: state.templates.filter((t) => t.id !== action.payload) };
+
+    case 'DELETE_COLLECTION':
+      return { ...state, collections: state.collections.filter((c) => c.id !== action.payload) };
 
     default:
       return state;
@@ -156,11 +290,20 @@ function reducer(state: FlightState, action: Action): FlightState {
 // ─── Context ────────────────────────────────────────────────
 interface FlightContextValue {
   state: FlightState;
-  startRun: (templateId: string) => void;
-  toggleBranchOption: (optionKey: string, branchSteps: Step[]) => void;
+  compileAndStartRun: (id: string, isTemplate: boolean) => void;
   toggleStep: (stepId: string) => void;
   completeRun: () => void;
-  saveCustomTemplate: (name: string, tags: string[], stepTexts: string[]) => void;
+  appendCollectionToActiveRun: (collectionId: string) => void;
+  saveActiveRunAsTemplate: (title: string, description: string) => Promise<void>;
+  saveCustomCollection: (
+    name: string,
+    description: string,
+    tags: string[],
+    stepTexts: string[],
+    executionMode: ExecutionMode,
+  ) => Promise<void>;
+  deleteTemplate: (templateId: string) => Promise<void>;
+  deleteCollection: (collectionId: string) => Promise<void>;
 }
 
 const FlightContext = createContext<FlightContextValue | null>(null);
@@ -169,85 +312,146 @@ const FlightContext = createContext<FlightContextValue | null>(null);
 export function FlightManualProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // Hydrate
+  // Hydrate with safe AsyncStorage fallback
   useEffect(() => {
     (async () => {
       try {
-        const [tplJson, runJson, logsJson] = await Promise.all([
-          AsyncStorage.getItem(KEYS.templates),
-          AsyncStorage.getItem(KEYS.activeRun),
-          AsyncStorage.getItem(KEYS.runLogs),
-        ]);
+        const collections = await safeGetItem<Collection[]>(KEYS.collections, SEED_COLLECTIONS);
+        const templates = await safeGetItem<Template[]>(KEYS.templates, []);
+        const activeRun = await safeGetItem<RunInstance | null>(KEYS.activeRun, null);
+        const historyLogs = await safeGetItem<RunLog[]>(KEYS.runLogs, SEED_LOGS);
+
+        dispatch({
+          type: 'HYDRATE',
+          payload: { collections, templates, activeRun, historyLogs },
+        });
+      } catch (error) {
+        console.error('[FlightManual] Hydration failed, using seed data:', error);
         dispatch({
           type: 'HYDRATE',
           payload: {
-            templates: tplJson ? JSON.parse(tplJson) : SEED_TEMPLATES,
-            activeRun: runJson && runJson !== '' ? JSON.parse(runJson) : null,
-            historyLogs: logsJson ? JSON.parse(logsJson) : SEED_LOGS,
+            collections: SEED_COLLECTIONS,
+            templates: [],
+            activeRun: null,
+            historyLogs: SEED_LOGS
           },
         });
-      } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        if (errorMessage.includes('Native module is null')) {
-          console.warn('[FlightManual] AsyncStorage not available, using in-memory storage only');
-          console.warn('[FlightManual] Run: npx expo run:ios or npx expo run:android to rebuild');
-        } else {
-          console.error('[FlightManual] Hydration failed:', e);
-        }
-        dispatch({
-          type: 'HYDRATE',
-          payload: { templates: SEED_TEMPLATES, activeRun: null, historyLogs: SEED_LOGS },
-        });
       }
     })();
   }, []);
 
-  // Persist
+  // Persist all state changes with safe fallback
   useEffect(() => {
     if (state.isLoading) return;
+
     (async () => {
       try {
-        const activeRunValue = state.activeRun ? JSON.stringify(state.activeRun) : '';
-        await Promise.all([
-          AsyncStorage.setItem(KEYS.templates, JSON.stringify(state.templates)),
-          AsyncStorage.setItem(KEYS.activeRun, activeRunValue),
-          AsyncStorage.setItem(KEYS.runLogs, JSON.stringify(state.historyLogs)),
-        ]);
-      } catch (e) {
-        const errorMessage = e instanceof Error ? e.message : String(e);
-        if (errorMessage.includes('Native module is null')) {
-          if (Math.random() < 0.01) {
-            console.warn('[FlightManual] AsyncStorage persistence unavailable - rebuild dev client with: npx expo run:ios');
-          }
+        // Handle activeRun null case for deletion
+        if (state.activeRun === null) {
+          await safeRemoveItem(KEYS.activeRun);
+        } else {
+          await safeSetItem(KEYS.activeRun, state.activeRun);
         }
+
+        await Promise.all([
+          safeSetItem(KEYS.collections, state.collections),
+          safeSetItem(KEYS.templates, state.templates),
+          safeSetItem(KEYS.runLogs, state.historyLogs),
+        ]);
+      } catch (error) {
+        console.error('[FlightManual] Persistence failed, continuing with in-memory state:', error);
       }
     })();
-  }, [state.templates, state.activeRun, state.historyLogs, state.isLoading]);
+  }, [state.collections, state.templates, state.activeRun, state.historyLogs, state.isLoading]);
 
   // ─── Actions ──────────────────────────────────────────────
-  const startRun = useCallback((templateId: string) => {
-    const template = state.templates.find((t) => t.id === templateId);
-    if (!template) return;
-    const steps = cloneSteps(template.baseSteps).map((s, i) => ({
-      ...s,
-      isLocked: i !== 0,
-    }));
-    dispatch({
-      type: 'START_RUN',
-      payload: {
-        id: `run_${Date.now()}`,
-        templateId,
-        startedAt: Date.now(),
-        currentSteps: steps,
-        selectedBranches: [],
-        isFinished: false,
-      },
-    });
-  }, [state.templates]);
+  const compileAndStartRun = useCallback(
+    (id: string, isTemplate: boolean) => {
+      let collectionIds: string[] = [];
 
-  const toggleBranchOption = useCallback((optionKey: string, branchSteps: Step[]) => {
-    dispatch({ type: 'TOGGLE_BRANCH', payload: { optionKey, branchSteps } });
-  }, []);
+      if (isTemplate) {
+        const template = state.templates.find((t) => t.id === id);
+        if (!template) return;
+        collectionIds = template.templateIds;
+      } else {
+        collectionIds = [id];
+      }
+
+      const compiledSteps: CompiledStep[] = [];
+      const seenIds = new Set<string>();
+
+      for (const cId of collectionIds) {
+        const collection = state.collections.find((c) => c.id === cId);
+        if (!collection) continue;
+
+        const isParallel = collection.executionMode === 'parallel';
+        const steps = collection.steps.map((s, i) => {
+          const uniqueId = seenIds.has(s.id) ? `${cId}::${s.id}` : s.id;
+          seenIds.add(uniqueId);
+          return {
+            ...s,
+            id: uniqueId,
+            isCompleted: false,
+            isLocked: isParallel ? false : i !== 0,
+            dependsOnStepId: !isParallel && i > 0
+              ? (seenIds.has(collection.steps[i - 1].id)
+                ? `${cId}::${collection.steps[i - 1].id}`
+                : collection.steps[i - 1].id)
+              : undefined,
+            parentTemplateName: collection.name,
+            executionMode: collection.executionMode,
+          } as CompiledStep;
+        });
+        compiledSteps.push(...steps);
+      }
+
+      dispatch({
+        type: 'START_RUN',
+        payload: {
+          id: `run_${Date.now()}`,
+          startedAt: Date.now(),
+          currentSteps: compiledSteps,
+          isFinished: false,
+        },
+      });
+    },
+    [state.collections, state.templates],
+  );
+
+  const appendCollectionToActiveRun = useCallback(
+    (collectionId: string) => {
+      if (!state.activeRun) return;
+      const collection = state.collections.find((c) => c.id === collectionId);
+      if (!collection) return;
+
+      const isParallel = collection.executionMode === 'parallel';
+      const seenIds = new Set(state.activeRun.currentSteps.map((s) => s.id));
+
+      const newSteps: CompiledStep[] = collection.steps.map((s, i) => {
+        const uniqueId = seenIds.has(s.id) ? `${collectionId}::${s.id}` : s.id;
+        seenIds.add(uniqueId);
+        return {
+          ...s,
+          id: uniqueId,
+          isCompleted: false,
+          isLocked: isParallel ? false : i !== 0,
+          dependsOnStepId: !isParallel && i > 0
+            ? (seenIds.has(collection.steps[i - 1].id)
+              ? `${collectionId}::${collection.steps[i - 1].id}`
+              : collection.steps[i - 1].id)
+            : undefined,
+          parentTemplateName: collection.name,
+          executionMode: collection.executionMode,
+        } as CompiledStep;
+      });
+
+      dispatch({
+        type: 'APPEND_STEPS',
+        payload: newSteps,
+      });
+    },
+    [state.activeRun, state.collections],
+  );
 
   const toggleStep = useCallback((stepId: string) => {
     dispatch({ type: 'TOGGLE_STEP', payload: stepId });
@@ -258,29 +462,124 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     dispatch({
       type: 'COMPLETE_RUN',
       payload: {
-        templateId: state.activeRun.templateId,
+        collectionId: 'combined_run',
         timestamp: Date.now(),
         durationMs: Date.now() - state.activeRun.startedAt,
       },
     });
   }, [state.activeRun]);
 
-  const saveCustomTemplate = useCallback((name: string, tags: string[], stepTexts: string[]) => {
-    const id = `tpl_${Date.now()}`;
-    const baseSteps: Step[] = stepTexts.map((text, i) => ({
-      id: `step_${id}_${i}`,
-      text,
-      isCompleted: false,
-      isLocked: i !== 0,
-      dependsOnStepId: i > 0 ? `step_${id}_${i - 1}` : undefined,
-    }));
-    const template: Template = { id, name, tags, baseSteps };
-    dispatch({ type: 'SAVE_TEMPLATE', payload: template });
-  }, []);
+  const saveActiveRunAsTemplate = useCallback(
+    async (title: string, description: string) => {
+      if (!state.activeRun) return;
+
+      const uniqueNames = [...new Set(state.activeRun.currentSteps.map((s) => s.parentTemplateName))];
+      const collectionIds = uniqueNames
+        .map((name) => state.collections.find((c) => c.name === name)?.id)
+        .filter((id): id is string => !!id);
+
+      if (collectionIds.length < 2) return;
+
+      const template: Template = {
+        id: `tpl_${Date.now()}`,
+        title,
+        description: description || undefined,
+        templateIds: collectionIds,
+      };
+
+      dispatch({ type: 'SAVE_TEMPLATE', payload: template });
+
+      try {
+        const current = await safeGetItem<Template[]>(KEYS.templates, []);
+        await safeSetItem(KEYS.templates, [...current, template]);
+      } catch (e) {
+        console.error('[FlightManual] saveActiveRunAsTemplate failed:', e);
+      }
+    },
+    [state.activeRun, state.collections],
+  );
+
+  const saveCustomCollection = useCallback(
+    async (
+      name: string,
+      description: string,
+      tags: string[],
+      stepTexts: string[],
+      executionMode: ExecutionMode,
+    ) => {
+      const id = `col_${Date.now()}`;
+
+      const steps: Step[] = stepTexts.map((text, i) => ({
+        id: `step_${id}_${i}`,
+        text,
+        isCompleted: false,
+        isLocked: false,
+        dependsOnStepId: i > 0 ? `step_${id}_${i - 1}` : undefined,
+      }));
+
+      const collection: Collection = {
+        id,
+        name,
+        description: description || undefined,
+        tags,
+        executionMode,
+        steps,
+      };
+      dispatch({ type: 'SAVE_COLLECTION', payload: collection });
+
+      try {
+        const current = await safeGetItem<Collection[]>(KEYS.collections, []);
+        await safeSetItem(KEYS.collections, [...current, collection]);
+      } catch (e) {
+        console.error('[FlightManual] saveCustomCollection failed:', e);
+      }
+    },
+    [],
+  );
+
+  const deleteTemplate = useCallback(
+    async (templateId: string) => {
+      dispatch({ type: 'DELETE_TEMPLATE', payload: templateId });
+
+      try {
+        const current = await safeGetItem<Template[]>(KEYS.templates, []);
+        const filtered = current.filter((t) => t.id !== templateId);
+        await safeSetItem(KEYS.templates, filtered);
+      } catch (e) {
+        console.error('[FlightManual] deleteTemplate failed:', e);
+      }
+    },
+    [],
+  );
+
+  const deleteCollection = useCallback(
+    async (collectionId: string) => {
+      dispatch({ type: 'DELETE_COLLECTION', payload: collectionId });
+
+      try {
+        const current = await safeGetItem<Collection[]>(KEYS.collections, []);
+        const filtered = current.filter((c) => c.id !== collectionId);
+        await safeSetItem(KEYS.collections, filtered);
+      } catch (e) {
+        console.error('[FlightManual] deleteCollection failed:', e);
+      }
+    },
+    [],
+  );
 
   return (
     <FlightContext.Provider
-      value={{ state, startRun, toggleBranchOption, toggleStep, completeRun, saveCustomTemplate }}
+      value={{
+        state,
+        compileAndStartRun,
+        toggleStep,
+        completeRun,
+        appendCollectionToActiveRun,
+        saveActiveRunAsTemplate,
+        saveCustomCollection,
+        deleteTemplate,
+        deleteCollection,
+      }}
     >
       {children}
     </FlightContext.Provider>

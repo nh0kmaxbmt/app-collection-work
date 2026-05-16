@@ -1,4 +1,4 @@
-// src/components/StepItem.tsx
+// src/components/StepItem.tsx — V4 with CompiledStep support
 import { Pressable, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import type { Step } from '../core/types';

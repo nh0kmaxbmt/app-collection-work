@@ -1,4 +1,6 @@
-// src/core/types.ts — V3 Multi-Select Engine
+// src/core/types.ts — V6 Mid-Flight Composable Pipeline
+
+export type ExecutionMode = 'linear' | 'parallel';
 
 export interface Step {
   id: string;
@@ -6,33 +8,38 @@ export interface Step {
   isCompleted: boolean;
   isLocked: boolean;
   dependsOnStepId?: string;
-  branchSource?: string; // tracks which option injected this task
 }
 
-export interface BranchingStep {
-  question: string;
-  options: Record<string, Step[]>;
+export interface Collection {
+  id: string;
+  name: string;
+  description?: string;
+  tags: string[];
+  executionMode: ExecutionMode;
+  steps: Step[];
 }
 
 export interface Template {
   id: string;
-  name: string;
-  tags: string[];
-  baseSteps: Step[];
-  branchingStep?: BranchingStep;
+  title: string;
+  description?: string;
+  templateIds: string[];
 }
+
+export type CompiledStep = Step & {
+  parentTemplateName: string;
+  executionMode: ExecutionMode;
+};
 
 export interface RunInstance {
   id: string;
-  templateId: string;
   startedAt: number;
-  currentSteps: Step[];
-  selectedBranches: string[]; // V3: now an array for multi-selection
+  currentSteps: CompiledStep[];
   isFinished: boolean;
 }
 
 export interface RunLog {
-  templateId: string;
+  collectionId: string;
   timestamp: number;
   durationMs: number;
 }

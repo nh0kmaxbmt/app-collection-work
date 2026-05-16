@@ -1,4 +1,4 @@
-// app/create-template.tsx
+// app/create-template.tsx — V6.2 Collection Creator (Renamed Execution Modes)
 import { useState } from 'react';
 import {
   View,
@@ -9,16 +9,24 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  useColorScheme,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useFlightManual } from '../src/core/store';
+import type { ExecutionMode } from '../src/core/types';
 
-export default function CreateTemplate() {
-  const { saveCustomTemplate } = useFlightManual();
+export default function CreateCollection() {
+  const { saveCustomCollection } = useFlightManual();
 
   const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
   const [tagsInput, setTagsInput] = useState('');
   const [stepTexts, setStepTexts] = useState<string[]>(['']);
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>('linear');
+
+  // Detect color scheme for adaptive theming
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const addStep = () => setStepTexts((prev) => [...prev, '']);
 
@@ -34,7 +42,7 @@ export default function CreateTemplate() {
     setStepTexts((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmedName = name.trim();
     const filledSteps = stepTexts.map((s) => s.trim()).filter((s) => s.length > 0);
     if (!trimmedName || filledSteps.length === 0) return;
@@ -44,21 +52,47 @@ export default function CreateTemplate() {
       .map((t) => t.trim().toLowerCase())
       .filter((t) => t.length > 0);
 
-    saveCustomTemplate(trimmedName, tags, filledSteps);
+    // Save with execution mode
+    await saveCustomCollection(trimmedName, description.trim(), tags, filledSteps, executionMode);
 
     // Reset form
     setName('');
+    setDescription('');
     setTagsInput('');
     setStepTexts(['']);
+    setExecutionMode('linear');
 
     router.back();
   };
 
   const canSave = name.trim().length > 0 && stepTexts.some((s) => s.trim().length > 0);
 
+  // Adaptive styles
+  const adaptiveStyles = {
+    container: isDark ? styles.containerDark : styles.containerLight,
+    headerTitle: isDark ? styles.headerTitleDark : styles.headerTitleLight,
+    fieldLabel: isDark ? styles.fieldLabelDark : styles.fieldLabelLight,
+    textInput: isDark ? styles.textInputDark : styles.textInputLight,
+    placeholderText: isDark ? '#6b7280' : '#9ca3af',
+    executionModeButton: isDark ? styles.executionModeButtonDark : styles.executionModeButtonLight,
+    executionModeButtonSelected: isDark ? styles.executionModeButtonSelectedDark : styles.executionModeButtonSelectedLight,
+    executionModeButtonText: isDark ? styles.executionModeButtonTextDark : styles.executionModeButtonTextLight,
+    executionModeButtonTextSelected: isDark ? styles.executionModeButtonTextSelectedDark : styles.executionModeButtonTextSelectedLight,
+    executionModeDescription: isDark ? styles.executionModeDescriptionDark : styles.executionModeDescriptionLight,
+    stepNumber: isDark ? styles.stepNumberDark : styles.stepNumberLight,
+    stepInput: isDark ? styles.stepInputDark : styles.stepInputLight,
+    stepPlaceholderText: isDark ? '#6b7280' : '#9ca3af',
+    removeButtonText: isDark ? styles.removeButtonTextDark : styles.removeButtonTextLight,
+    addStepButtonText: isDark ? styles.addStepButtonTextDark : styles.addStepButtonTextLight,
+    saveButtonActive: isDark ? styles.saveButtonActiveDark : styles.saveButtonActiveLight,
+    saveButtonTextActive: isDark ? styles.saveButtonTextActiveDark : styles.saveButtonTextActiveLight,
+    saveButtonTextInactive: isDark ? styles.saveButtonTextInactiveDark : styles.saveButtonTextInactiveLight,
+    footerBorder: isDark ? styles.footerBorderDark : styles.footerBorderLight,
+  };
+
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={adaptiveStyles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView
@@ -67,74 +101,136 @@ export default function CreateTemplate() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Header */}
-        <Text style={styles.headerTitle}>New Template</Text>
+        <Text style={adaptiveStyles.headerTitle}>New Template</Text>
 
-        {/* Template name */}
+        {/* Template name (REQUIRED) */}
         <View style={styles.fieldContainer}>
-          <Text style={styles.fieldLabel}>Template Name</Text>
+          <View style={styles.labelRow}>
+            <Text style={adaptiveStyles.fieldLabel}>Template Name</Text>
+            <Text style={styles.requiredAsterisk}> *</Text>
+          </View>
           <TextInput
-            style={styles.textInput}
+            style={adaptiveStyles.textInput}
             placeholder="e.g. Grocery Packing"
-            placeholderTextColor="#6b7280"
+            placeholderTextColor={adaptiveStyles.placeholderText}
             value={name}
             onChangeText={setName}
           />
         </View>
 
-        {/* Tags */}
+        {/* Description (Optional) */}
         <View style={styles.fieldContainer}>
-          <Text style={styles.fieldLabel}>Tags (comma-separated)</Text>
+          <Text style={adaptiveStyles.fieldLabel}>Description (Optional)</Text>
           <TextInput
-            style={styles.textInput}
+            style={adaptiveStyles.textInput}
+            placeholder="Brief description of this template"
+            placeholderTextColor={adaptiveStyles.placeholderText}
+            value={description}
+            onChangeText={setDescription}
+          />
+        </View>
+
+        {/* Tags (Optional) */}
+        <View style={styles.fieldContainer}>
+          <Text style={adaptiveStyles.fieldLabel}>Tags (comma-separated)</Text>
+          <TextInput
+            style={adaptiveStyles.textInput}
             placeholder="e.g. errands, weekly"
-            placeholderTextColor="#6b7280"
+            placeholderTextColor={adaptiveStyles.placeholderText}
             value={tagsInput}
             onChangeText={setTagsInput}
           />
         </View>
 
-        {/* Step builder */}
+        {/* Execution Mode Selector - Updated Labels: Sequential/Flexible */}
+        <View style={styles.fieldContainer}>
+          <Text style={adaptiveStyles.fieldLabel}>Execution Mode</Text>
+          <View style={styles.executionModeContainer}>
+            <Pressable
+              onPress={() => setExecutionMode('linear')}
+              style={[
+                adaptiveStyles.executionModeButton,
+                executionMode === 'linear' ? adaptiveStyles.executionModeButtonSelected : null,
+              ]}
+            >
+              <Text
+                style={[
+                  adaptiveStyles.executionModeButtonText,
+                  executionMode === 'linear' ? adaptiveStyles.executionModeButtonTextSelected : null,
+                ]}
+              >
+                Sequential
+              </Text>
+              <Text style={adaptiveStyles.executionModeDescription}>
+                Complete steps in strict chronological order
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setExecutionMode('parallel')}
+              style={[
+                adaptiveStyles.executionModeButton,
+                executionMode === 'parallel' ? adaptiveStyles.executionModeButtonSelected : null,
+              ]}
+            >
+              <Text
+                style={[
+                  adaptiveStyles.executionModeButtonText,
+                  executionMode === 'parallel' ? adaptiveStyles.executionModeButtonTextSelected : null,
+                ]}
+              >
+                Flexible
+              </Text>
+              <Text style={adaptiveStyles.executionModeDescription}>
+                All steps available to check off in any order
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Step builder (REQUIRED) */}
         <View style={styles.stepsContainer}>
-          <Text style={styles.fieldLabel}>Steps</Text>
+          <View style={styles.labelRow}>
+            <Text style={adaptiveStyles.fieldLabel}>Steps</Text>
+            <Text style={styles.requiredAsterisk}> *</Text>
+          </View>
           {stepTexts.map((text, i) => (
             <View key={i} style={styles.stepRow}>
-              <Text style={styles.stepNumber}>{i + 1}.</Text>
+              <Text style={adaptiveStyles.stepNumber}>{i + 1}.</Text>
               <TextInput
-                style={styles.stepInput}
+                style={adaptiveStyles.stepInput}
                 placeholder={`Step ${i + 1}`}
-                placeholderTextColor="#6b7280"
+                placeholderTextColor={adaptiveStyles.stepPlaceholderText}
                 value={text}
                 onChangeText={(t) => updateStep(i, t)}
               />
               {stepTexts.length > 1 && (
                 <Pressable onPress={() => removeStep(i)} style={styles.removeButton}>
-                  <Text style={styles.removeButtonText}>Remove</Text>
+                  <Text style={adaptiveStyles.removeButtonText}>Remove</Text>
                 </Pressable>
               )}
             </View>
           ))}
 
-          {/* Add step button */}
           <Pressable onPress={addStep} style={styles.addStepButton}>
-            <Text style={styles.addStepButtonText}>+ Add Step</Text>
+            <Text style={adaptiveStyles.addStepButtonText}>+ Add Step</Text>
           </Pressable>
         </View>
       </ScrollView>
 
       {/* Save button */}
-      <View style={styles.footerContainer}>
+      <View style={[styles.footerContainer, adaptiveStyles.footerBorder]}>
         <Pressable
           onPress={handleSave}
           disabled={!canSave}
           style={[
             styles.saveButton,
-            canSave ? styles.saveButtonActive : styles.saveButtonInactive,
+            canSave ? adaptiveStyles.saveButtonActive : styles.saveButtonInactive,
           ]}
         >
           <Text
             style={[
               styles.saveButtonText,
-              canSave ? styles.saveButtonTextActive : styles.saveButtonTextInactive,
+              canSave ? adaptiveStyles.saveButtonTextActive : adaptiveStyles.saveButtonTextInactive,
             ]}
           >
             Save Template
@@ -146,9 +242,14 @@ export default function CreateTemplate() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  // Container - Adaptive light/dark
+  containerLight: {
     flex: 1,
-    backgroundColor: '#030712',
+    backgroundColor: '#fafafa',
+  },
+  containerDark: {
+    flex: 1,
+    backgroundColor: '#09090b',
   },
   scrollView: {
     flex: 1,
@@ -158,30 +259,114 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 16,
   },
-  headerTitle: {
+  headerTitleLight: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#ffffff',
+    color: '#18181b',
+    marginBottom: 24,
+  },
+  headerTitleDark: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fafafa',
     marginBottom: 24,
   },
   fieldContainer: {
     marginBottom: 16,
   },
-  fieldLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#9ca3af',
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 8,
   },
-  textInput: {
-    borderRadius: 8,
+  fieldLabelLight: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#71717a',
+  },
+  fieldLabelDark: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#a1a1aa',
+  },
+  requiredAsterisk: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#ef4444',
+    marginLeft: 2,
+  },
+  textInputLight: {
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#111827',
+    borderColor: '#e4e4e7',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 16,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#ffffff',
+    color: '#18181b',
+  },
+  textInputDark: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#18181b',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#fafafa',
+  },
+  executionModeContainer: {
+    gap: 8,
+  },
+  executionModeButtonLight: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e4e4e7',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  executionModeButtonDark: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#18181b',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  executionModeButtonSelectedLight: {
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+  },
+  executionModeButtonSelectedDark: {
+    borderColor: '#3b82f6',
+    backgroundColor: 'rgba(59, 130, 246, 0.15)',
+  },
+  executionModeButtonTextLight: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#71717a',
+    marginBottom: 4,
+  },
+  executionModeButtonTextDark: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#a1a1aa',
+    marginBottom: 4,
+  },
+  executionModeButtonTextSelectedLight: {
+    color: '#3b82f6',
+  },
+  executionModeButtonTextSelectedDark: {
+    color: '#60a5fa',
+  },
+  executionModeDescriptionLight: {
+    fontSize: 13,
+    color: '#a1a1aa',
+  },
+  executionModeDescriptionDark: {
+    fontSize: 13,
+    color: '#71717a',
   },
   stepsContainer: {
     marginBottom: 16,
@@ -192,73 +377,121 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
-  stepNumber: {
+  stepNumberLight: {
     width: 24,
     fontSize: 12,
-    color: '#6b7280',
+    color: '#a1a1aa',
     textAlign: 'right',
   },
-  stepInput: {
+  stepNumberDark: {
+    width: 24,
+    fontSize: 12,
+    color: '#71717a',
+    textAlign: 'right',
+  },
+  stepInputLight: {
     flex: 1,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
-    backgroundColor: '#111827',
+    borderColor: '#e4e4e7',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 16,
-    color: '#ffffff',
+    color: '#18181b',
+  },
+  stepInputDark: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#18181b',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#fafafa',
   },
   removeButton: {
     paddingHorizontal: 8,
     paddingVertical: 12,
   },
-  removeButtonText: {
+  removeButtonTextLight: {
+    fontSize: 14,
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  removeButtonTextDark: {
     fontSize: 14,
     color: '#ef4444',
     fontWeight: '600',
   },
   addStepButton: {
-    marginTop: 8,
-    borderRadius: 8,
+    marginTop: 12,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#374151',
-    borderStyle: 'dashed',
-    backgroundColor: '#111827',
-    paddingVertical: 12,
+    borderColor: 'rgba(59, 130, 246, 0.3)',
+    backgroundColor: '#2563eb',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  addStepButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#6b7280',
+  addStepButtonTextLight: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
+  },
+  addStepButtonTextDark: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+    letterSpacing: 0.3,
   },
   footerContainer: {
     borderTopWidth: 1,
-    borderTopColor: '#1f2937',
     paddingHorizontal: 16,
     paddingBottom: 32,
     paddingTop: 16,
+  },
+  footerBorderLight: {
+    borderTopColor: '#e4e4e7',
+  },
+  footerBorderDark: {
+    borderTopColor: '#27272a',
   },
   saveButton: {
     borderRadius: 12,
     paddingVertical: 16,
   },
-  saveButtonActive: {
+  saveButtonActiveLight: {
+    backgroundColor: '#2563eb',
+  },
+  saveButtonActiveDark: {
     backgroundColor: '#2563eb',
   },
   saveButtonInactive: {
-    backgroundColor: '#1f2937',
+    backgroundColor: '#e4e4e7',
   },
   saveButtonText: {
     textAlign: 'center',
     fontSize: 16,
     fontWeight: '700',
   },
-  saveButtonTextActive: {
+  saveButtonTextActiveLight: {
     color: '#ffffff',
   },
-  saveButtonTextInactive: {
-    color: '#4b5563',
+  saveButtonTextActiveDark: {
+    color: '#ffffff',
+  },
+  saveButtonTextInactiveLight: {
+    color: '#a1a1aa',
+  },
+  saveButtonTextInactiveDark: {
+    color: '#71717a',
   },
 });

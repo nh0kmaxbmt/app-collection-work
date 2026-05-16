@@ -1,0 +1,22 @@
+System Role: You are a Principal Systems Architect and Senior React Native Engineer specializing in Expo Router, NativeWind, and AsyncStorage.
+
+Tasks to Execute:
+
+1. Fix AsyncStorage Persistence Bug (src/core/store.ts):
+- Locate the initialization/hydration engine code. 
+- Ensure that when the app boots, it strictly reads 'flightmanual::templates' from AsyncStorage. If data exists, populate the local state with it. ONLY seed the default 'Gym Session Prep' template if the returned value from storage is completely null or missing.
+- Double-check that 'saveCustomTemplate' correctly updates the React state AND stringifies the updated array back to 'flightmanual::templates' storage key immediately.
+
+2. Refactor UI Button Styling (app/create-template.tsx):
+- Locate the text button component for '[+ Add Step]'.
+- Change its styling from transparent/black to a highly visible, solid dark blue touch state layout using NativeWind classes: 'bg-blue-600 active:bg-blue-700 dark:bg-indigo-950 dark:active:bg-indigo-900 border border-blue-500/30 px-4 py-3 rounded-xl'. Ensure the text inside is bold and crisp.
+
+3. Implement the "Branch Creator" Engine Feature (app/create-template.tsx & src/core/store.ts):
+- Modify the template creation screen schema interface to support building conditional workflows.
+- Add a new sectional toggle: 'Add Conditional Branch Options'.
+- When activated, expose a text input field for 'Branch Question' (e.g., "What focus group today?").
+- Implement a dynamic array builder for Option Blocks. Each Option block has an 'Option Name' text input (e.g., "legs") and an independent sub-array list of steps.
+- Update your form submit handler: When packaging the payload, append this object structure cleanly into the template schema as the 'branchingStep' property, auto-tagging sub-tasks with their corresponding 'branchSource' key under the hood.
+
+Deliverable Constraints:
+Provide the full, un-truncated file replacements for 'src/core/store.ts' and 'app/create-template.tsx'. Do not use placeholder omissions or skip layout trees. Ensure all components are built cleanly using proper React Native primitives.

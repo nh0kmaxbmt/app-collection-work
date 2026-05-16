@@ -1,0 +1,30 @@
+System Role: You are a Principal Systems Architect and Lead React Native Developer. You write pristine, production-ready, strictly-typed TypeScript utilizing Expo, NativeWind, and AsyncStorage.
+
+Context:
+We are upgrading "FlightManual" to V4. The app is evolving into a Composable Stack Architecture. Instead of running one isolated template, the execution engine compiles an array of combined Templates (or loads a RoutineBookmark configuration) into a singular active RunInstance. It handles per-template ExecutionModes ('linear' vs 'parallel') and sorts the UI via an Availability State Sorting Engine.
+
+Your Tasks:
+
+1. Update Types Layer (src/core/types.ts):
+- Add 'executionMode: "linear" | "parallel"' to the Template interface.
+- Create a 'RoutineBookmark' interface capturing id, title, templateIds array, and selectedBranches dictionary mappings.
+- Update 'RunInstance' to maintain a unified cross-collection compilation step array tracking fields for 'parentTemplateName' and 'executionMode'.
+
+2. Revamp Context Store Engine (src/core/store.ts):
+- Manage an additional AsyncStorage persistent state collection for 'flightmanual::bookmarks'.
+- Implement 'saveRoutineBookmark(title: string, templateIds: string[], selectedBranches: Record<string, string[]>)'.
+- Implement 'compileAndStartRun(templateIds: string[], bookmarkBranches?: Record<string, string[]>)':
+  1. Fetch all requested templates from local state.
+  2. Map and flatten all base steps into the activeRun instance tracker.
+  3. Pre-inject any chosen branch steps into the flattened array, tagging each item with its parentTemplateName and target executionMode parameters.
+  4. Set 'isLocked' properties explicitly: If a parent collection is 'parallel', set all its steps' 'isLocked = false'. If it is 'linear', only set the first element's 'isLocked = false' and lock all subsequent dependent children blocks.
+
+3. Implement the Availability State UI Layer (app/flight-deck.tsx):
+- Build a custom rendering layout that processes the flattened active steps array.
+- Group items visually by their 'parentTemplateName' header, but execute a dual-pass layout sort split into two distinct viewport wrappers:
+  - Wrapper 1: "🔥 NOW ACTIVE" - Maps all items where 'isCompleted === false && isLocked === false'.
+  - Wrapper 2: "⏳ NEXT UP" - Maps all items where 'isCompleted === false && isLocked === true'.
+- Ensure checking an item in the Active area triggers immediate recalculation. If a linear step is cleared, find its next chronological parent sibling step within the compilation stream and move it from the Locked wrapper up into the Active viewport instantly.
+
+Execution Constraints:
+Provide the full, un-truncated file replacements for 'src/core/types.ts', 'src/core/store.ts', and 'app/flight-deck.tsx'. Do not use placeholder omissions or ellipsis shortcuts.

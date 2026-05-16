@@ -1,21 +1,21 @@
 // src/core/engine.ts
-import type { Template, RunLog } from './types';
+import type { Collection, RunLog } from './types';
 
 /**
- * Scores templates by how often they've been run within a +/- 2-hour window
- * of the current time. Returns templates sorted by score (descending).
+ * Scores collections by how often they've been run within a +/- 2-hour window
+ * of the current time. Returns collections sorted by score (descending).
  *
- * Fallback: if no logs exist, returns templates in their original order.
+ * Fallback: if no logs exist, returns collections in their original order.
  */
-export function getWeightedTemplates(
-  templates: Template[],
+export function getWeightedCollections(
+  collections: Collection[],
   logs: RunLog[],
-): Template[] {
-  if (logs.length === 0) return templates;
+): Collection[] {
+  if (logs.length === 0) return collections;
 
   const currentHour = new Date().getHours();
 
-  // Build score map: templateId -> number
+  // Build score map: collectionId -> number
   const scores = new Map<string, number>();
 
   for (const log of logs) {
@@ -26,13 +26,13 @@ export function getWeightedTemplates(
     const wrappedDiff = Math.min(hourDiff, 24 - hourDiff);
 
     if (wrappedDiff <= 2) {
-      const prev = scores.get(log.templateId) ?? 0;
-      scores.set(log.templateId, prev + 1);
+      const prev = scores.get(log.collectionId) ?? 0;
+      scores.set(log.collectionId, prev + 1);
     }
   }
 
   // Stable sort: higher score first
-  return [...templates].sort((a, b) => {
+  return [...collections].sort((a, b) => {
     const scoreA = scores.get(a.id) ?? 0;
     const scoreB = scores.get(b.id) ?? 0;
     return scoreB - scoreA;

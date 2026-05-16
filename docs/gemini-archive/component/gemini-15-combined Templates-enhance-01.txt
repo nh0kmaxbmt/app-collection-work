@@ -1,0 +1,36 @@
+System Role: You are a Principal Software Architect and Lead React Native Developer specializing in clean, maintainable Expo implementations using TypeScript, AsyncStorage, and NativeWind.
+
+Context:
+We are executing the V5 Final Architecture for "FlightManual". Based on real-world application testing, we are completely eliminating internal template "branchingStep" logic rules. Every checklist collection is now completely flat, standalone, and explicitly configured as either 'linear' or 'parallel'. To handle dynamic scenarios, the app compiles an array of multiple distinct templates simultaneously. Users can combine templates on the fly via a Multi-Select Launcher dashboard queue, and save those combinations permanently as a 'RoutineBookmark' containing a custom Name and Description.
+
+Your Tasks:
+
+1. Clean and Refactor Data Types (src/core/types.ts):
+- Strip out all definitions of 'BranchingStep', 'BranchCondition', and conditional matching metadata tags.
+- Update 'Template' to represent a flat entity: id, name, description, tags, executionMode ('linear' | 'parallel'), and steps: Step[].
+- Update 'RoutineBookmark' to hold: id, title, description, and templateIds: string[].
+- Ensure 'RunInstance' flattens all combined compiled steps into a unified stream tracking 'parentTemplateName' and 'executionMode'.
+
+2. Update Core Context Store Operations (src/core/store.ts):
+- Modify 'compileAndStartRun(templateIds: string[], bookmarkId?: string)':
+  1. Pull all requested flat templates from local state pools.
+  2. Map and flatten their child steps into the active running instance pool.
+  3. Pre-process locking constraints natively: Parallel template items receive 'isLocked = false' immediately. Linear template items lock all sequential sibling records except for their very first element index item.
+- Implement 'saveRoutineBookmark(title: string, description: string, templateIds: string[])':
+  1. Build a new RoutineBookmark object payload.
+  2. Persist it permanently to local state arrays and append directly into the 'flightmanual::bookmarks' AsyncStorage cache system.
+
+3. Refactor Dashboard Launcher Layout (app/index.tsx):
+- Build a Multi-Select Command interface. The user can search templates and check off multiple checklist badges concurrently.
+- Include a visual queue tray layout at the bottom displaying currently stacked items.
+- Provide two high-contrast actions on the tray: 
+  - Action A: "Launch Flight" (triggers compileAndStartRun directly).
+  - Action B: "Save Bookmark" (displays an overlay modal containing text inputs for 'Bookmark Name' and 'Description', calls saveRoutineBookmark(), and updates the home screen grid).
+- Render a distinct shortcut grid layout showing all saved Routine Bookmarks for instant 1-tap execution launches.
+
+4. Adapt the Flight Deck Execution UI (app/flight-deck.tsx):
+- The screen remains split into the dual-viewport engine we built in V4: "🔥 NOW ACTIVE" (unlocked, uncompleted items sorted by template header tags) and "⏳ NEXT UP" (dimmed locked steps).
+- Ensure checking an item immediately propagates through the unified linear tracking array indices to unlock the next chronological sibling element task smoothly.
+
+Deliverable Constraints:
+Provide the full, un-truncated file configurations for 'src/core/types.ts', 'src/core/store.ts', 'app/index.tsx', and 'app/flight-deck.tsx'. Do not use placeholder shortcuts or code truncations.
