@@ -38,8 +38,9 @@ export interface RunInstance {
   startedAt: number;
   currentSteps: CompiledStep[];
   isFinished: boolean;
-  customName: string; // User-defined name for saved runs
-  expiresAt: number; // 24-hour expiry timestamp (required for saved runs)
+  customName?: string; // User-defined name for saved runs (optional for active runs)
+  expiresAt?: number; // 24-hour expiry timestamp (required for saved runs)
+  savedRunId?: string; // Tracks if this run was resumed from a saved run
 }
 
 export interface RunLog {

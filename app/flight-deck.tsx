@@ -1,6 +1,6 @@
-// app/flight-deck.tsx — V8.4 Save for Later with Custom Name & Conditional Validation
+// app/flight-deck.tsx — V8.5 Hardware Back Guard & Dual-Condition Exit Protection
 import { Stack } from 'expo-router';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,14 @@ import {
   TextInput,
   Alert,
   StyleSheet,
+  BackHandler,
 } from 'react-native';
+import { useNavigation, useRouter } from 'expo-router';
 import Animated, {
   useAnimatedStyle,
   withTiming,
   Layout,
 } from 'react-native-reanimated';
-import { router } from 'expo-router';
 import { useFlightManual } from '../src/core/store';
 import type { CompiledStep } from '../src/core/types';
 
@@ -72,6 +73,9 @@ function AnimatedStepItem({ step, onPress }: AnimatedStepItemProps) {
 }
 
 export default function FlightDeck() {
+  const router = useRouter();
+  const navigation = useNavigation();
+
   const {
     state,
     toggleStep,
@@ -79,6 +83,8 @@ export default function FlightDeck() {
     appendCollectionToActiveRun,
     saveActiveRunAsTemplate,
     saveCurrentRunForLater,
+    updateSavedRun,
+    clearActiveRun,
   } = useFlightManual();
   const { activeRun, collections } = state;
 
@@ -90,6 +96,11 @@ export default function FlightDeck() {
   const [appendSearch, setAppendSearch] = useState('');
   const [saveForLaterModalVisible, setSaveForLaterModalVisible] = useState(false);
   const [customRunName, setCustomRunName] = useState('');
+
+  // Back guard state
+  const [exitModalVisible, setExitModalVisible] = useState(false);
+  const [exitSaveName, setExitSaveName] = useState('');
+  const [showExitSaveInput, setShowExitSaveInput] = useState(false);
 
   // Memoized values based on activeRun state
   const steps = activeRun?.currentSteps ?? [];
@@ -152,14 +163,20 @@ export default function FlightDeck() {
     [progress, activeRun?.isFinished],
   );
 
-  // ─── Handlers ───────────────────────────────────────────────
-  const handleAppend = (collectionId: string) => {
+  // Condition: Disable "Save for Later" if no incomplete tasks remain
+  const canSaveForLater = incompleteCount > 0;
+
+  // Check if this is a resumed saved run for back-guard logic
+  const isFromSavedRun = !!activeRun?.savedRunId;
+
+  // ─── Handlers (defined before useEffect to avoid dependency issues) ─────
+  const handleAppend = useCallback((collectionId: string) => {
     appendCollectionToActiveRun(collectionId);
     setAppendModalVisible(false);
     setAppendSearch('');
-  };
+  }, [appendCollectionToActiveRun]);
 
-  const handleSave = () => {
+  const handleSave = useCallback(() => {
     if (!saveTitle.trim()) {
       Alert.alert('Error', 'Please enter a name for this routine');
       return;
@@ -169,41 +186,135 @@ export default function FlightDeck() {
     setSaveDescription('');
     setSaveModalVisible(false);
     Alert.alert('Saved', 'Your routine has been saved successfully');
-  };
+  }, [saveTitle, saveDescription, saveActiveRunAsTemplate]);
 
-  const handleComplete = () => {
+  const handleComplete = useCallback(() => {
     if (!activeRun) return;
 
-    // Navigate FIRST before clearing state to ensure component unmounts cleanly
-    router.replace('/');
-
-    // Then complete the run (clears activeRun)
+    // Complete the run first (clears activeRun via state update)
     completeRun();
-  };
 
-  // Save for Later - opens modal for custom name input
-  const handleSaveForLaterPress = () => {
+    // Then navigate back - since activeRun is now null, beforeRemove will allow unmount
+    router.back();
+  }, [activeRun, completeRun, router]);
+
+  const handleSaveForLaterPress = useCallback(() => {
     if (!activeRun) return;
     setSaveForLaterModalVisible(true);
-  };
+  }, [activeRun]);
 
-  const handleSaveForLaterConfirm = () => {
+  const handleSaveForLaterConfirm = useCallback(() => {
     const trimmedName = customRunName.trim();
     if (!trimmedName) {
       Alert.alert('Error', 'Please enter a name for this saved run');
       return;
     }
 
+    // Save clears activeRun via state update
     saveCurrentRunForLater(trimmedName);
     setCustomRunName('');
     setSaveForLaterModalVisible(false);
-    router.replace('/');
-  };
 
-  const handleSaveForLaterCancel = () => {
+    // Navigate back - since activeRun is now null, beforeRemove will allow unmount
+    router.back();
+  }, [customRunName, saveCurrentRunForLater, router]);
+
+  const handleSaveForLaterCancel = useCallback(() => {
     setCustomRunName('');
     setSaveForLaterModalVisible(false);
-  };
+  }, []);
+
+  const handleExitSaveProgress = useCallback(() => {
+    if (!exitSaveName.trim()) {
+      Alert.alert('Name Required', 'Please enter a name to save your progress');
+      return;
+    }
+
+    // Save clears activeRun via state update
+    saveCurrentRunForLater(exitSaveName.trim());
+    setExitModalVisible(false);
+    setExitSaveName('');
+    setShowExitSaveInput(false);
+
+    // Navigate back - since activeRun is now null, beforeRemove will allow unmount
+    router.back();
+  }, [exitSaveName, saveCurrentRunForLater, router]);
+
+  const handleExitAbandon = useCallback(() => {
+    // Clear activeRun via state update
+    clearActiveRun();
+    setExitModalVisible(false);
+    setExitSaveName('');
+    setShowExitSaveInput(false);
+
+    // Navigate back - since activeRun is now null, beforeRemove will allow unmount
+    router.back();
+  }, [clearActiveRun, router]);
+
+  const handleExitCancel = useCallback(() => {
+    setExitModalVisible(false);
+    setExitSaveName('');
+    setShowExitSaveInput(false);
+  }, []);
+
+  // ─── Hardware Back Guard & Navigation Interception ─────────────
+  // NOTE: This useEffect implements conditional dual-condition back interception.
+  // The key insight is that we ONLY intercept when state.activeRun exists.
+  // Once the run is completed/saved/abandoned and activeRun is null, we allow
+  // native unmounting to proceed normally, preventing navigation deadlock.
+  useEffect(() => {
+    const handleBackPress = () => {
+      if (!activeRun) return false;
+
+      if (isFromSavedRun) {
+        // CASE A: Resumed saved run → silent autosave + exit
+        if (activeRun.savedRunId) {
+          updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
+        }
+        clearActiveRun();
+        router.back();
+        return true;
+      }
+
+      // CASE B: Fresh run → show exit confirmation modal
+      setExitModalVisible(true);
+      return true;
+    };
+
+    // Android hardware back button listener
+    const backSubscription = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+
+    // iOS swipe-back + header back button listener
+    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+      // CRITICAL: Check state FIRST before calling preventDefault
+      // If activeRun is already cleared/null, DO NOT call preventDefault.
+      // This allows native unmounting to proceed normally and prevents deadlock.
+      if (!activeRun) {
+        return;
+      }
+
+      // Only block native transition if we have an active run to manage
+      e.preventDefault();
+
+      if (isFromSavedRun) {
+        // CASE A: Resumed saved run → silent autosave + exit
+        if (activeRun.savedRunId) {
+          updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
+        }
+        clearActiveRun(); // Ensure state is cleared to unblock subsequent triggers
+        router.back();
+      } else {
+        // CASE B: Fresh run → show exit confirmation modal
+        setExitModalVisible(true);
+      }
+    });
+
+    // Cleanup listeners on unmount
+    return () => {
+      backSubscription.remove();
+      unsubscribe();
+    };
+  }, [activeRun, isFromSavedRun, navigation, updateSavedRun, clearActiveRun, router]);
 
   // ─── CONDITIONAL RENDERING (after all hooks) ─────────────────────
   if (!activeRun) {
@@ -222,7 +333,7 @@ export default function FlightDeck() {
 
         <Text style={styles.emptyText}>No active run</Text>
         <Pressable
-          onPress={() => router.replace('/')}
+          onPress={() => router.back()}
           style={styles.backButton}
         >
           <Text style={styles.backButtonText}>Go Home</Text>
@@ -230,9 +341,6 @@ export default function FlightDeck() {
       </View>
     );
   }
-
-  // Condition: Disable "Save for Later" if no incomplete tasks remain
-  const canSaveForLater = incompleteCount > 0;
 
   return (
     <View style={styles.container}>
@@ -522,6 +630,71 @@ export default function FlightDeck() {
                 </Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Exit Confirmation Modal - Dual-Condition Back Guard */}
+      <Modal
+        visible={exitModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={handleExitCancel}
+      >
+        <View style={styles.exitModalOverlay}>
+          <View style={styles.exitModalContent}>
+            <Text style={styles.exitModalTitle}>Leave Flight Deck?</Text>
+            <Text style={styles.exitModalDescription}>
+              You have an active run in progress with {incompleteCount} step{incompleteCount !== 1 ? 's' : ''} remaining.
+            </Text>
+
+            {/* Option 1: Save Progress */}
+            {!showExitSaveInput ? (
+              <Pressable
+                onPress={() => setShowExitSaveInput(true)}
+                style={styles.exitModalButtonPrimary}
+              >
+                <Text style={styles.exitModalButtonTextPrimary}>💾 Save Progress for Later</Text>
+              </Pressable>
+            ) : (
+              <View style={styles.exitModalSaveInputContainer}>
+                <TextInput
+                  style={styles.exitModalInput}
+                  placeholder="e.g., Evening Gym Run"
+                  placeholderTextColor="#6b7280"
+                  value={exitSaveName}
+                  onChangeText={setExitSaveName}
+                  autoFocus
+                  maxLength={50}
+                />
+                <Pressable
+                  onPress={handleExitSaveProgress}
+                  disabled={!exitSaveName.trim()}
+                  style={[
+                    styles.exitModalButtonPrimary,
+                    !exitSaveName.trim() && styles.exitModalButtonDisabled,
+                  ]}
+                >
+                  <Text style={styles.exitModalButtonTextPrimary}>Save & Exit</Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Option 2: Abandon Run */}
+            <Pressable
+              onPress={handleExitAbandon}
+              style={styles.exitModalButtonDestructive}
+            >
+              <Text style={styles.exitModalButtonTextDestructive}>🗑️ Abandon Run</Text>
+            </Pressable>
+
+            {/* Option 3: Cancel / Stay */}
+            <Pressable
+              onPress={handleExitCancel}
+              style={styles.exitModalButtonSecondary}
+            >
+              <Text style={styles.exitModalButtonTextSecondary}>Cancel</Text>
+            </Pressable>
           </View>
         </View>
       </Modal>
@@ -866,5 +1039,93 @@ const styles = StyleSheet.create({
   },
   modalSaveButtonTextDisabled: {
     color: '#4b5563',
+  },
+
+  // Exit Modal Styles
+  exitModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.70)',
+    paddingHorizontal: 24,
+  },
+  exitModalContent: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#111827',
+    borderRadius: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 24,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+  },
+  exitModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  exitModalDescription: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginBottom: 20,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  exitModalSaveInputContainer: {
+    marginBottom: 12,
+  },
+  exitModalInput: {
+    marginBottom: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    backgroundColor: '#030712',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#ffffff',
+  },
+  exitModalButtonPrimary: {
+    backgroundColor: '#2563eb',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  exitModalButtonDisabled: {
+    backgroundColor: '#1f2937',
+    opacity: 0.6,
+  },
+  exitModalButtonTextPrimary: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  exitModalButtonDestructive: {
+    backgroundColor: 'rgba(220, 38, 38, 0.15)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  exitModalButtonTextDestructive: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#f87171',
+  },
+  exitModalButtonSecondary: {
+    backgroundColor: '#1f2937',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  exitModalButtonTextSecondary: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#9ca3af',
   },
 });

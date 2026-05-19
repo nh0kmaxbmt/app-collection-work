@@ -34,7 +34,7 @@ export default function Dashboard() {
     deleteTemplate,
     deleteCollection,
     viewMode,
-    resumeSpecificRun,
+    resumeSavedRun,
     deleteSavedRun,
     getSavedRunExpiryHours,
   } = useFlightManual();
@@ -105,7 +105,7 @@ export default function Dashboard() {
   // Filter saved runs to only show non-expired ones
   const validSavedRuns = useMemo(() => {
     const now = Date.now();
-    return state.savedRuns.filter(run => run.expiresAt > now);
+    return state.savedRuns.filter(run => run.expiresAt && run.expiresAt > now);
   }, [state.savedRuns]);
 
   const handleLaunchCollection = (id: string) => {
@@ -119,7 +119,7 @@ export default function Dashboard() {
   };
 
   const handleResumeRun = (runId: string) => {
-    resumeSpecificRun(runId);
+    resumeSavedRun(runId);
     router.push('/flight-deck' as any);
   };
 
