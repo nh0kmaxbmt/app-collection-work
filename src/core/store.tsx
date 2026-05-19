@@ -1,4 +1,4 @@
-// src/core/store.tsx — V9.1 Centralized Config & Dynamic Expiry Integration with Conditional Deletion
+// src/core/store.tsx — V9.2 Centralized Config & Dynamic Expiry Integration with Structural Scope Tracking
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { APP_CONFIG, logConfigState } from './config';
@@ -685,13 +685,16 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   const compileAndStartRun = useCallback(
     (id: string, isTemplate: boolean) => {
       let collectionIds: string[] = [];
+      let primaryCollectionId: string | undefined;
 
       if (isTemplate) {
         const template = state.templates.find((t) => t.id === id);
         if (!template) return;
         collectionIds = template.templateIds;
+        // Templates don't have a single primary collection
       } else {
         collectionIds = [id];
+        primaryCollectionId = id; // Track single-collection source
       }
 
       const compiledSteps: CompiledStep[] = [];
@@ -726,6 +729,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         type: 'START_RUN',
         payload: {
           id: `run_${Date.now()}`,
+          collectionId: primaryCollectionId, // NEW: Track source collection for baseline comparison
           startedAt: Date.now(),
           currentSteps: compiledSteps,
           isFinished: false,

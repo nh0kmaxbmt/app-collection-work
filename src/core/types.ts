@@ -1,4 +1,4 @@
-// src/core/types.ts — V9.1 Multi-Instance Saved Runs & Enhanced Features with Conditional Deletion
+// src/core/types.ts — V9.2 Multi-Instance Saved Runs & Enhanced Features with Structural Scope Tracking
 
 export type ExecutionMode = 'linear' | 'parallel';
 
@@ -35,6 +35,7 @@ export type CompiledStep = Step & {
 
 export interface RunInstance {
   id: string;
+  collectionId?: string; // References the primary collection that launched this run
   startedAt: number;
   currentSteps: CompiledStep[];
   isFinished: boolean;

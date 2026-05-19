@@ -1,4 +1,4 @@
-// app/flight-deck.tsx — V9.1 Hardware Back Guard & Dual-Condition Exit Protection with Conditional Deletion
+// app/flight-deck.tsx — V9.2 Hardware Back Guard & Dual-Condition Exit Protection with Structural Scope Tracking
 import { Stack } from 'expo-router';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
@@ -169,9 +169,22 @@ export default function FlightDeck() {
   // Check if this is a resumed saved run for back-guard logic
   const isFromSavedRun = !!activeRun?.savedRunId;
 
-  // Mutation delta check: determines if user has made any progress on this run
-  // Used to implement RULE B (untouched runs get instant exit without modal)
-  const isUntouched = activeRun?.currentSteps.filter(s => s.isCompleted).length === 0;
+  // Structural scope mutation delta tracking
+  // Look up the master baseline collection template for comparison
+  const masterCollection = activeRun?.collectionId
+    ? collections.find((c) => c.id === activeRun.collectionId)
+    : null;
+  const baselineStepCount = masterCollection ? masterCollection.steps.length : 0;
+
+  // Progress counters
+  const completedStepsCount = activeRun?.currentSteps.filter((s) => s.isCompleted).length ?? 0;
+  const currentStepsCount = activeRun?.currentSteps.length ?? 0;
+
+  // Mutation delta check: determines if user has made ANY changes to this run
+  // Run is ONLY untouched if:
+  // 1. Zero items are completed (no progress mutation)
+  // 2. AND no steps were appended or removed (no structural scope mutation)
+  const isUntouched = completedStepsCount === 0 && currentStepsCount === baselineStepCount;
 
   // Fully completed check: determines if all steps are done
   // Used to implement RULE A-1 (completed resumed runs get finalized and scrubbed from pending)
@@ -359,7 +372,7 @@ export default function FlightDeck() {
       backSubscription.remove();
       unsubscribe();
     };
-  }, [activeRun, isFromSavedRun, isUntouched, isFullyCompleted, navigation, completeRun, updateSavedRun, clearActiveRun, router]);
+  }, [activeRun, isFromSavedRun, isUntouched, isFullyCompleted, navigation, completeRun, updateSavedRun, clearActiveRun, router, collections]);
 
   // ─── CONDITIONAL RENDERING (after all hooks) ─────────────────────
   if (!activeRun) {
