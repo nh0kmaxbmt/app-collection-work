@@ -1,4 +1,5 @@
 // app/flight-deck.tsx — V6.1 Dynamic Execution Deck (Hook-Safe & Navigation-Robust)
+import { Stack } from 'expo-router';
 import { useState, useCallback, useMemo } from 'react';
 import {
   View,
@@ -65,9 +66,6 @@ function AnimatedStepItem({ step, onPress }: AnimatedStepItemProps) {
           {step.isCompleted && <Text style={styles.checkmark}>&#10003;</Text>}
         </Animated.View>
         <Animated.Text style={textStyle}>{step.text}</Animated.Text>
-        {step.executionMode === 'parallel' && (
-          <Text style={styles.executionModeBadge}>parallel</Text>
-        )}
       </Pressable>
     </AnimatedView>
   );
@@ -83,6 +81,7 @@ export default function FlightDeck() {
   } = useFlightManual();
   const { activeRun, collections } = state;
 
+
   // ─── ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS ───
   const [appendModalVisible, setAppendModalVisible] = useState(false);
   const [saveModalVisible, setSaveModalVisible] = useState(false);
@@ -96,6 +95,14 @@ export default function FlightDeck() {
   const totalCount = steps.length;
   const progress = totalCount > 0 ? completedCount / totalCount : 0;
 
+
+    // Get the collection name for the header from the first group of steps, fallback if not available
+  const collectionName =
+    steps.length > 0 && steps[0].parentTemplateName
+      ? steps[0].parentTemplateName
+      : 'Routine';
+
+  
   // Unique collection count for save guard
   const uniqueCollections = useMemo(
     () => new Set(steps.map((s) => s.parentTemplateName)),
@@ -177,6 +184,20 @@ export default function FlightDeck() {
   if (!activeRun) {
     return (
       <View style={styles.emptyContainer}>
+  // Stack.Screen for header display
+  // This MUST be before other hooks/returns for expo-router header
+  <Stack.Screen 
+        options={{ 
+          title: "New Collection",
+          headerShadowVisible: false,
+          // Optional: Match your beautiful dark/light adaptive styling
+          headerStyle: { 
+            backgroundColor: '#09090b' // Use your theme's color variable here
+          },
+          headerTintColor: '#f4f4f5' 
+        }} 
+      />
+
         <Text style={styles.emptyText}>No active run</Text>
         <Pressable
           onPress={() => router.replace('/')}
@@ -192,7 +213,6 @@ export default function FlightDeck() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Flight Plan</Text>
         <Text style={styles.headerSubtitle}>
           {completedCount} / {totalCount} complete
         </Text>

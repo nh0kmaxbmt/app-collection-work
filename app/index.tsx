@@ -80,8 +80,16 @@ export default function Dashboard() {
     return items;
   }, [state.templates, search]);
 
+  // Q: What is passed to flight-deck? Do we have the name of the collection?
+  // A: In the current code, `handleLaunchCollection` does not pass any parameters to the `/flight-deck` route; it just pushes the route as a string.
+  // The name of the collection is not passed via navigation params. 
+  // The routine actually starts in the store (`compileAndStartRun(id, false)`), and the flight-deck gets the currently active run from state.
+  // Therefore, the collection name is available inside 'flight-deck' by looking at the run's steps or collection metadata in the store, 
+  // but it is NOT passed as a prop or navigation param.
+
   const handleLaunchCollection = (id: string) => {
-    compileAndStartRun(id, false);
+    compileAndStartRun(id, false); // This sets the active run in the store
+    // No parameters are passed here; flight-deck will query store for active run
     router.push('/flight-deck' as any);
   };
 
@@ -157,27 +165,67 @@ export default function Dashboard() {
   const styles = getStyles(isDark);
 
   // Render cloud tag mode - Enhanced with gorgeous capsule cards
+  // WordPress-style tag cloud: uniform size/color in pill box with background color for each tag
   const renderCloudMode = () => (
-    <View style={styles.cloudContainer}>
+    <View
+      style={[
+        styles.cloudContainer,
+        {
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: 10,
+          justifyContent: 'center',
+          alignItems: 'flex-end',
+        },
+      ]}
+    >
       {sortedCollections.map((col) => (
         <Pressable
           key={col.id}
           onPress={() => handleLaunchCollection(col.id)}
           onLongPress={() => handleDeleteCollection(col)}
           style={({ pressed }) => [
-            styles.cloudPill,
-            isDark ? styles.cloudPillDark : styles.cloudPillLight,
-            pressed && styles.cloudPillPressed,
+            {
+              flexDirection: 'row',
+              alignItems: 'center',
+              margin: 4,
+              backgroundColor: isDark
+                ? 'rgba(39,41,54,0.87)'
+                : 'rgba(224,242,254,1)',
+              borderRadius: 9999,
+              paddingHorizontal: 18,
+              paddingVertical: 8,
+              minHeight: 36,
+              shadowColor: isDark ? 'rgba(0,0,0,0.15)' : 'rgba(0,0,0,0.07)',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.10,
+              shadowRadius: 6,
+              elevation: 2,
+              borderWidth: pressed ? 2 : 0,
+              borderColor: pressed ? '#2563eb' : 'transparent',
+            },
           ]}
         >
-          <View style={styles.cloudPillContent}>
-            <Text style={isDark ? styles.cloudPillNameDark : styles.cloudPillNameLight}>
-              {col.name}
-            </Text>
-            <Text style={isDark ? styles.cloudPillCountDark : styles.cloudPillCountLight}>
-              ({col.steps.length})
-            </Text>
-          </View>
+          <Text
+            style={{
+              fontSize: 16,
+              fontWeight: '700',
+              color: isDark ? '#e0edfa' : '#1e293b',
+              letterSpacing: 0.1,
+            }}
+          >
+            {col.name}
+          </Text>
+          <Text
+            style={{
+              fontSize: 13,
+              fontWeight: '600',
+              color: isDark ? '#60a5fa' : '#2563eb',
+              marginLeft: 8,
+            }}
+          >
+            ({col.steps.length})
+          </Text>
         </Pressable>
       ))}
     </View>

@@ -40,6 +40,13 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
+      },
+      "package": "com.b2stszx.myapptemplate"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "537c67a8-e63e-4f60-886d-958f539a258b"
       }
     }
   }
