@@ -1,4 +1,4 @@
-// src/core/store.tsx — V8.1 Dashboard View Modes & Backup Engine
+// src/core/store.tsx — V8.4 Multi-Instance Saved Runs & Enhanced Features
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
@@ -17,6 +17,7 @@ const KEYS = {
   collections: 'flightmanual::collections',
   templates: 'flightmanual::templates',
   activeRun: 'flightmanual::active_run',
+  savedRuns: 'flightmanual::saved_runs',
   runLogs: 'flightmanual::run_logs',
   viewMode: 'flightmanual::view_mode',
 } as const;
@@ -118,27 +119,34 @@ interface FlightState {
   collections: Collection[];
   templates: Template[];
   activeRun: RunInstance | null;
+  savedRuns: RunInstance[];
   historyLogs: RunLog[];
   isLoading: boolean;
 }
 
 // ─── Actions ────────────────────────────────────────────────
 type Action =
-  | { type: 'HYDRATE'; payload: { collections: Collection[]; templates: Template[]; activeRun: RunInstance | null; historyLogs: RunLog[] } }
+  | { type: 'HYDRATE'; payload: { collections: Collection[]; templates: Template[]; activeRun: RunInstance | null; savedRuns: RunInstance[]; historyLogs: RunLog[] } }
   | { type: 'START_RUN'; payload: RunInstance }
   | { type: 'TOGGLE_STEP'; payload: string }
   | { type: 'COMPLETE_RUN'; payload: RunLog }
   | { type: 'APPEND_STEPS'; payload: CompiledStep[] }
   | { type: 'SAVE_TEMPLATE'; payload: Template }
   | { type: 'SAVE_COLLECTION'; payload: Collection }
+  | { type: 'UPDATE_COLLECTION'; payload: { id: string; name: string; description: string; tags: string[]; executionMode: ExecutionMode; steps: Step[] } }
   | { type: 'DELETE_TEMPLATE'; payload: string }
   | { type: 'DELETE_COLLECTION'; payload: string }
+  | { type: 'SAVE_RUN_FOR_LATER'; payload: { run: RunInstance; name: string } }
+  | { type: 'RESUME_SPECIFIC_RUN'; payload: RunInstance }
+  | { type: 'DELETE_SAVED_RUN'; payload: string }
+  | { type: 'CLEAR_EXPIRED_RUNS' }
   | { type: 'REPLACE_ALL_DATA'; payload: { collections: Collection[]; templates: Template[]; historyLogs: RunLog[] } };
 
 const initialState: FlightState = {
   collections: [],
   templates: [],
   activeRun: null,
+  savedRuns: [],
   historyLogs: [],
   isLoading: true,
 };
@@ -280,11 +288,58 @@ function reducer(state: FlightState, action: Action): FlightState {
     case 'SAVE_COLLECTION':
       return { ...state, collections: [...state.collections, action.payload] };
 
+    case 'UPDATE_COLLECTION': {
+      const { id, name, description, tags, executionMode, steps } = action.payload;
+      return {
+        ...state,
+        collections: state.collections.map(col =>
+          col.id === id
+            ? { ...col, name, description, tags, executionMode, steps }
+            : col
+        ),
+      };
+    }
+
     case 'DELETE_TEMPLATE':
       return { ...state, templates: state.templates.filter((t) => t.id !== action.payload) };
 
     case 'DELETE_COLLECTION':
       return { ...state, collections: state.collections.filter((c) => c.id !== action.payload) };
+
+    case 'SAVE_RUN_FOR_LATER': {
+      const { run, name } = action.payload;
+      const runWithName: RunInstance = {
+        ...run,
+        customName: name,
+        expiresAt: Date.now() + (24 * 60 * 60 * 1000), // 24 hours from now
+      };
+      return {
+        ...state,
+        activeRun: null,
+        savedRuns: [...state.savedRuns, runWithName],
+      };
+    }
+
+    case 'RESUME_SPECIFIC_RUN':
+      return {
+        ...state,
+        activeRun: action.payload,
+        savedRuns: state.savedRuns.filter(r => r.id !== action.payload.id),
+      };
+
+    case 'DELETE_SAVED_RUN':
+      return {
+        ...state,
+        savedRuns: state.savedRuns.filter(r => r.id !== action.payload),
+      };
+
+    case 'CLEAR_EXPIRED_RUNS': {
+      const now = Date.now();
+      return {
+        ...state,
+        savedRuns: state.savedRuns.filter(run => run.expiresAt > now),
+      };
+    }
 
     case 'REPLACE_ALL_DATA':
       return {
@@ -316,8 +371,22 @@ interface FlightContextValue {
     stepTexts: string[],
     executionMode: ExecutionMode,
   ) => Promise<void>;
+  updateCollection: (
+    id: string,
+    name: string,
+    description: string,
+    tags: string[],
+    executionMode: ExecutionMode,
+    stepTexts: string[],
+  ) => Promise<void>;
   deleteTemplate: (templateId: string) => Promise<void>;
   deleteCollection: (collectionId: string) => Promise<void>;
+  saveCurrentRunForLater: (name: string) => void;
+  resumeSpecificRun: (runId: string) => void;
+  deleteSavedRun: (runId: string) => void;
+  isRunExpired: () => boolean;
+  getRunExpiryHours: () => number;
+  getSavedRunExpiryHours: (runId: string) => number;
   exportData: () => Promise<string>;
   importData: (jsonStr: string) => Promise<boolean>;
 }
@@ -341,18 +410,45 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  // Hydrate with safe AsyncStorage fallback
+  // Hydrate with safe AsyncStorage fallback and 24-hour expiry cleanup for saved runs
   useEffect(() => {
     (async () => {
       try {
         const collections = await safeGetItem<Collection[]>(KEYS.collections, SEED_COLLECTIONS);
         const templates = await safeGetItem<Template[]>(KEYS.templates, []);
-        const activeRun = await safeGetItem<RunInstance | null>(KEYS.activeRun, null);
+        let activeRun = await safeGetItem<RunInstance | null>(KEYS.activeRun, null);
+        let savedRuns = await safeGetItem<RunInstance[]>(KEYS.savedRuns, []);
         const historyLogs = await safeGetItem<RunLog[]>(KEYS.runLogs, SEED_LOGS);
+
+        const now = Date.now();
+
+        // Garbage collection: Check if active run has expired (24-hour limit)
+        if (activeRun && activeRun.expiresAt) {
+          if (now > activeRun.expiresAt) {
+            console.log('[FlightManual] Active run expired, clearing...');
+            activeRun = null;
+            await safeRemoveItem(KEYS.activeRun);
+          }
+        }
+
+        // Garbage collection: Filter out expired saved runs
+        const validSavedRuns = savedRuns.filter(run => {
+          if (now > run.expiresAt) {
+            console.log(`[FlightManual] Saved run "${run.customName}" expired, removing...`);
+            return false;
+          }
+          return true;
+        });
+
+        // Persist cleaned saved runs if any were removed
+        if (validSavedRuns.length !== savedRuns.length) {
+          await safeSetItem(KEYS.savedRuns, validSavedRuns);
+          savedRuns = validSavedRuns;
+        }
 
         dispatch({
           type: 'HYDRATE',
-          payload: { collections, templates, activeRun, historyLogs },
+          payload: { collections, templates, activeRun, savedRuns, historyLogs },
         });
       } catch (error) {
         console.error('[FlightManual] Hydration failed, using seed data:', error);
@@ -362,6 +458,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
             collections: SEED_COLLECTIONS,
             templates: [],
             activeRun: null,
+            savedRuns: [],
             historyLogs: SEED_LOGS
           },
         });
@@ -382,6 +479,9 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
           await safeSetItem(KEYS.activeRun, state.activeRun);
         }
 
+        // Persist saved runs array
+        await safeSetItem(KEYS.savedRuns, state.savedRuns);
+
         await Promise.all([
           safeSetItem(KEYS.collections, state.collections),
           safeSetItem(KEYS.templates, state.templates),
@@ -391,7 +491,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         console.error('[FlightManual] Persistence failed, continuing with in-memory state:', error);
       }
     })();
-  }, [state.collections, state.templates, state.activeRun, state.historyLogs, state.isLoading]);
+  }, [state.collections, state.templates, state.activeRun, state.savedRuns, state.historyLogs, state.isLoading]);
 
   // ─── View Mode Management ─────────────────────────────────
   const setViewMode = useCallback(async (mode: DashboardViewMode) => {
@@ -406,14 +506,15 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   // ─── Export/Import Data Management ────────────────────────
   const exportData = useCallback(async (): Promise<string> => {
     const backup: FlightManualBackup = {
-      version: '8.1.0',
+      version: '8.4.0',
       exportedAt: Date.now(),
       collections: state.collections,
       templates: state.templates,
       historyLogs: state.historyLogs,
+      savedRuns: state.savedRuns,
     };
     return JSON.stringify(backup, null, 2);
-  }, [state.collections, state.templates, state.historyLogs]);
+  }, [state.collections, state.templates, state.historyLogs, state.savedRuns]);
 
   const importData = useCallback(async (jsonStr: string): Promise<boolean> => {
     try {
@@ -444,6 +545,11 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         throw new Error('Invalid backup: historyLogs must be an array');
       }
 
+      // savedRuns is optional for backwards compatibility
+      if (backup.savedRuns && !Array.isArray(backup.savedRuns)) {
+        throw new Error('Invalid backup: savedRuns must be an array');
+      }
+
       // Validate collection structure
       for (const col of backup.collections) {
         if (!col.id || !col.name || !Array.isArray(col.steps)) {
@@ -467,6 +573,16 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
           historyLogs: backup.historyLogs,
         },
       });
+
+      // Import saved runs if present
+      if (backup.savedRuns) {
+        const now = Date.now();
+        const validSavedRuns = backup.savedRuns.filter(run => run.expiresAt > now);
+        // Set saved runs through a separate dispatch
+        for (const run of validSavedRuns) {
+          dispatch({ type: 'SAVE_RUN_FOR_LATER', payload: { run, name: run.customName } });
+        }
+      }
 
       // Persist to AsyncStorage
       await Promise.all([
@@ -531,6 +647,8 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
           startedAt: Date.now(),
           currentSteps: compiledSteps,
           isFinished: false,
+          customName: '',
+          expiresAt: 0, // Not set for active runs
         },
       });
     },
@@ -656,6 +774,44 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const updateCollection = useCallback(
+    async (
+      id: string,
+      name: string,
+      description: string,
+      tags: string[],
+      executionMode: ExecutionMode,
+      stepTexts: string[],
+    ) => {
+      // Rebuild steps array from texts
+      const steps: Step[] = stepTexts.map((text, i) => ({
+        id: `step_${id}_${i}`,
+        text,
+        isCompleted: false,
+        isLocked: false,
+        dependsOnStepId: i > 0 ? `step_${id}_${i - 1}` : undefined,
+      }));
+
+      dispatch({
+        type: 'UPDATE_COLLECTION',
+        payload: { id, name, description, tags, executionMode, steps },
+      });
+
+      // Persist to AsyncStorage
+      try {
+        const updatedCollections = state.collections.map(col =>
+          col.id === id
+            ? { ...col, name, description, tags, executionMode, steps }
+            : col
+        );
+        await safeSetItem(KEYS.collections, updatedCollections);
+      } catch (e) {
+        console.error('[FlightManual] updateCollection failed:', e);
+      }
+    },
+    [state.collections],
+  );
+
   const deleteTemplate = useCallback(
     async (templateId: string) => {
       dispatch({ type: 'DELETE_TEMPLATE', payload: templateId });
@@ -686,6 +842,52 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Save current run for later with custom name
+  const saveCurrentRunForLater = useCallback((name: string) => {
+    if (!state.activeRun) return;
+    dispatch({ type: 'SAVE_RUN_FOR_LATER', payload: { run: state.activeRun, name } });
+  }, [state.activeRun]);
+
+  // Resume a specific saved run
+  const resumeSpecificRun = useCallback((runId: string) => {
+    const savedRun = state.savedRuns.find(r => r.id === runId);
+    if (!savedRun) return;
+
+    // Verify not expired before resuming
+    if (Date.now() > savedRun.expiresAt) {
+      console.log('[FlightManual] Cannot resume expired run');
+      return;
+    }
+
+    dispatch({ type: 'RESUME_SPECIFIC_RUN', payload: savedRun });
+  }, [state.savedRuns]);
+
+  // Delete a saved run
+  const deleteSavedRun = useCallback((runId: string) => {
+    dispatch({ type: 'DELETE_SAVED_RUN', payload: runId });
+  }, []);
+
+  // Check if current run is expired
+  const isRunExpired = useCallback(() => {
+    if (!state.activeRun || !state.activeRun.expiresAt) return false;
+    return Date.now() > state.activeRun.expiresAt;
+  }, [state.activeRun]);
+
+  // Get remaining hours before expiry for active run
+  const getRunExpiryHours = useCallback(() => {
+    if (!state.activeRun || !state.activeRun.expiresAt) return 0;
+    const remainingMs = state.activeRun.expiresAt - Date.now();
+    return Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
+  }, [state.activeRun]);
+
+  // Get remaining hours for a specific saved run
+  const getSavedRunExpiryHours = useCallback((runId: string) => {
+    const savedRun = state.savedRuns.find(r => r.id === runId);
+    if (!savedRun) return 0;
+    const remainingMs = savedRun.expiresAt - Date.now();
+    return Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
+  }, [state.savedRuns]);
+
   return (
     <FlightContext.Provider
       value={{
@@ -698,8 +900,15 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         appendCollectionToActiveRun,
         saveActiveRunAsTemplate,
         saveCustomCollection,
+        updateCollection,
         deleteTemplate,
         deleteCollection,
+        saveCurrentRunForLater,
+        resumeSpecificRun,
+        deleteSavedRun,
+        isRunExpired,
+        getRunExpiryHours,
+        getSavedRunExpiryHours,
         exportData,
         importData,
       }}

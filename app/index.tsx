@@ -1,4 +1,4 @@
-// app/index.tsx — V8.2 Dashboard with Enhanced Cloud View
+// app/index.tsx — V8.4 Multi-Instance Saved Runs & Action Sheet Menu
 import { useState, useMemo } from 'react';
 import { Stack } from 'expo-router';
 import {
@@ -8,20 +8,42 @@ import {
   ScrollView,
   TextInput,
   Alert,
+  Modal,
   StyleSheet,
   useColorScheme,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useFlightManual } from '../src/core/store';
-import type { Collection, Template } from '../src/core/types';
+import type { Collection, Template, RunInstance } from '../src/core/types';
 
 type SortMode = 'recent' | 'used';
+type ActionSheetType = 'collection' | 'template' | null;
+
+interface ActionSheetState {
+  visible: boolean;
+  type: ActionSheetType;
+  collection?: Collection;
+  template?: Template;
+}
 
 export default function Dashboard() {
-  const { state, compileAndStartRun, deleteTemplate, deleteCollection, viewMode } = useFlightManual();
+  const {
+    state,
+    compileAndStartRun,
+    deleteTemplate,
+    deleteCollection,
+    viewMode,
+    resumeSpecificRun,
+    deleteSavedRun,
+    getSavedRunExpiryHours,
+  } = useFlightManual();
   const [sortMode, setSortMode] = useState<SortMode>('recent');
   const [search, setSearch] = useState('');
+  const [actionSheet, setActionSheet] = useState<ActionSheetState>({
+    visible: false,
+    type: null,
+  });
 
   // Detect system color scheme for adaptive theming
   const colorScheme = useColorScheme();
@@ -80,16 +102,14 @@ export default function Dashboard() {
     return items;
   }, [state.templates, search]);
 
-  // Q: What is passed to flight-deck? Do we have the name of the collection?
-  // A: In the current code, `handleLaunchCollection` does not pass any parameters to the `/flight-deck` route; it just pushes the route as a string.
-  // The name of the collection is not passed via navigation params. 
-  // The routine actually starts in the store (`compileAndStartRun(id, false)`), and the flight-deck gets the currently active run from state.
-  // Therefore, the collection name is available inside 'flight-deck' by looking at the run's steps or collection metadata in the store, 
-  // but it is NOT passed as a prop or navigation param.
+  // Filter saved runs to only show non-expired ones
+  const validSavedRuns = useMemo(() => {
+    const now = Date.now();
+    return state.savedRuns.filter(run => run.expiresAt > now);
+  }, [state.savedRuns]);
 
   const handleLaunchCollection = (id: string) => {
-    compileAndStartRun(id, false); // This sets the active run in the store
-    // No parameters are passed here; flight-deck will query store for active run
+    compileAndStartRun(id, false);
     router.push('/flight-deck' as any);
   };
 
@@ -98,34 +118,86 @@ export default function Dashboard() {
     router.push('/flight-deck' as any);
   };
 
-  const handleDeleteTemplate = (template: Template) => {
+  const handleResumeRun = (runId: string) => {
+    resumeSpecificRun(runId);
+    router.push('/flight-deck' as any);
+  };
+
+  const handleDeleteSavedRun = (run: RunInstance) => {
     Alert.alert(
-      'Delete Routine',
-      `Are you sure you want to delete "${template.title}"?`,
+      'Delete Saved Run',
+      `Are you sure you want to delete "${run.customName}"?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => deleteTemplate(template.id),
+          onPress: () => deleteSavedRun(run.id),
         },
       ],
     );
   };
 
-  const handleDeleteCollection = (collection: Collection) => {
-    Alert.alert(
-      'Delete Collection',
-      `Are you sure you want to delete "${collection.name}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => deleteCollection(collection.id),
-        },
-      ],
-    );
+  const showCollectionActionSheet = (collection: Collection) => {
+    setActionSheet({
+      visible: true,
+      type: 'collection',
+      collection,
+    });
+  };
+
+  const showTemplateActionSheet = (template: Template) => {
+    setActionSheet({
+      visible: true,
+      type: 'template',
+      template,
+    });
+  };
+
+  const handleActionSheetEdit = () => {
+    if (actionSheet.type === 'collection' && actionSheet.collection) {
+      setActionSheet({ visible: false, type: null });
+      router.push({
+        pathname: '/create-collection',
+        params: { id: actionSheet.collection.id },
+      } as any);
+    }
+  };
+
+  const handleActionSheetDelete = () => {
+    if (actionSheet.type === 'collection' && actionSheet.collection) {
+      setActionSheet({ visible: false, type: null });
+      Alert.alert(
+        'Delete Collection',
+        `Are you sure you want to delete "${actionSheet.collection.name}"?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => deleteCollection(actionSheet.collection!.id),
+          },
+        ],
+      );
+    } else if (actionSheet.type === 'template' && actionSheet.template) {
+      setActionSheet({ visible: false, type: null });
+      Alert.alert(
+        'Delete Routine',
+        `Are you sure you want to delete "${actionSheet.template.title}"?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: () => deleteTemplate(actionSheet.template!.id),
+          },
+        ],
+      );
+    }
+  };
+
+  const closeActionSheet = () => {
+    setActionSheet({ visible: false, type: null });
   };
 
   // Helper to format card metadata line
@@ -165,7 +237,6 @@ export default function Dashboard() {
   const styles = getStyles(isDark);
 
   // Render cloud tag mode - Enhanced with gorgeous capsule cards
-  // WordPress-style tag cloud: uniform size/color in pill box with background color for each tag
   const renderCloudMode = () => (
     <View
       style={[
@@ -183,7 +254,7 @@ export default function Dashboard() {
         <Pressable
           key={col.id}
           onPress={() => handleLaunchCollection(col.id)}
-          onLongPress={() => handleDeleteCollection(col)}
+          onLongPress={() => showCollectionActionSheet(col)}
           style={({ pressed }) => [
             {
               flexDirection: 'row',
@@ -242,7 +313,7 @@ export default function Dashboard() {
             <Pressable
               key={tpl.id}
               onPress={() => handleLaunchTemplate(tpl.id)}
-              onLongPress={() => handleDeleteTemplate(tpl)}
+              onLongPress={() => showTemplateActionSheet(tpl)}
               style={({ pressed }) => [
                 styles.card,
                 pressed && styles.cardPressed,
@@ -268,7 +339,7 @@ export default function Dashboard() {
           <Pressable
             key={col.id}
             onPress={() => handleLaunchCollection(col.id)}
-            onLongPress={() => handleDeleteCollection(col)}
+            onLongPress={() => showCollectionActionSheet(col)}
             style={({ pressed }) => [
               styles.card,
               pressed && styles.cardPressed,
@@ -375,6 +446,52 @@ export default function Dashboard() {
           contentContainerStyle={viewMode === 'cloud' ? cloudScrollContentStyle : scrollContentContainerStyle}
           showsVerticalScrollIndicator={false}
         >
+          {/* Multi-Banner: Saved Runs Horizontal Scroll */}
+          {validSavedRuns.length > 0 && (
+            <View style={styles.savedRunsSection}>
+              <Text style={styles.savedRunsTitle}>⏸ Saved Runs</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.savedRunsScrollContent}
+              >
+                {validSavedRuns.map((run) => {
+                  const remainingHours = getSavedRunExpiryHours(run.id);
+                  const completedCount = run.currentSteps.filter(s => s.isCompleted).length;
+                  const totalCount = run.currentSteps.length;
+
+                  return (
+                    <View key={run.id} style={styles.savedRunCard}>
+                      <View style={styles.savedRunCardHeader}>
+                        <Text style={styles.savedRunName} numberOfLines={1}>
+                          {run.customName}
+                        </Text>
+                        <Pressable
+                          onPress={() => handleDeleteSavedRun(run)}
+                          style={styles.savedRunDeleteButton}
+                        >
+                          <Text style={styles.savedRunDeleteButtonText}>✕</Text>
+                        </Pressable>
+                      </View>
+                      <Text style={styles.savedRunProgress}>
+                        {completedCount}/{totalCount} steps
+                      </Text>
+                      <Text style={styles.savedRunExpiry}>
+                        Expires in {remainingHours}h
+                      </Text>
+                      <Pressable
+                        onPress={() => handleResumeRun(run.id)}
+                        style={styles.savedRunResumeButton}
+                      >
+                        <Text style={styles.savedRunResumeButtonText}>Resume</Text>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
+
           {/* Render based on view mode */}
           {viewMode === 'list' ? renderListMode() : renderCloudMode()}
         </ScrollView>
@@ -391,9 +508,42 @@ export default function Dashboard() {
 
         {/* Helper Text */}
         <View style={helperTextStyle}>
-          <Text style={styles.hintText}>Tap to launch · Long press to delete</Text>
+          <Text style={styles.hintText}>Tap to launch · Long press for options</Text>
         </View>
       </View>
+
+      {/* Action Sheet Modal */}
+      <Modal
+        visible={actionSheet.visible}
+        transparent
+        animationType="slide"
+        onRequestClose={closeActionSheet}
+      >
+        <Pressable style={styles.actionSheetOverlay} onPress={closeActionSheet}>
+          <View style={styles.actionSheetContent} onStartShouldSetResponder={() => true}>
+            <View style={styles.actionSheetHandle} />
+            <Text style={styles.actionSheetTitle}>
+              {actionSheet.type === 'collection' ? actionSheet.collection?.name : actionSheet.template?.title}
+            </Text>
+
+            <Pressable onPress={handleActionSheetEdit} style={styles.actionSheetButton}>
+              <Text style={styles.actionSheetButtonIcon}>✏️</Text>
+              <Text style={styles.actionSheetButtonText}>
+                {actionSheet.type === 'collection' ? 'Edit Collection' : 'View Routine Details'}
+              </Text>
+            </Pressable>
+
+            <Pressable onPress={handleActionSheetDelete} style={styles.actionSheetButtonDestructive}>
+              <Text style={styles.actionSheetButtonIcon}>🗑️</Text>
+              <Text style={styles.actionSheetButtonTextDestructive}>Delete</Text>
+            </Pressable>
+
+            <Pressable onPress={closeActionSheet} style={styles.actionSheetCancelButton}>
+              <Text style={styles.actionSheetCancelButtonText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </>
   );
 }
@@ -484,6 +634,71 @@ function getStyles(isDark: boolean) {
       flex: 1,
     },
 
+    // Saved runs section styles
+    savedRunsSection: {
+      marginBottom: 16,
+    },
+    savedRunsTitle: {
+      paddingHorizontal: 16,
+      marginBottom: 8,
+      fontSize: 14,
+      fontWeight: '700',
+      color: isDark ? '#f59e0b' : '#d97706',
+    },
+    savedRunsScrollContent: {
+      paddingHorizontal: 16,
+      gap: 12,
+    },
+    savedRunCard: {
+      width: 160,
+      borderRadius: 12,
+      backgroundColor: isDark ? 'rgba(245, 158, 11, 0.15)' : 'rgba(245, 158, 11, 0.1)',
+      borderWidth: 1,
+      borderColor: isDark ? 'rgba(245, 158, 11, 0.3)' : 'rgba(245, 158, 11, 0.2)',
+      padding: 12,
+    },
+    savedRunCardHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 6,
+    },
+    savedRunName: {
+      flex: 1,
+      fontSize: 15,
+      fontWeight: '700',
+      color: isDark ? '#fcd34d' : '#d97706',
+    },
+    savedRunDeleteButton: {
+      padding: 4,
+    },
+    savedRunDeleteButtonText: {
+      fontSize: 16,
+      color: isDark ? '#f87171' : '#dc2626',
+    },
+    savedRunProgress: {
+      fontSize: 13,
+      color: isDark ? '#fbbf24' : '#f59e0b',
+      marginBottom: 2,
+    },
+    savedRunExpiry: {
+      fontSize: 12,
+      color: isDark ? '#fbbf24' : '#f59e0b',
+      opacity: 0.8,
+      marginBottom: 8,
+    },
+    savedRunResumeButton: {
+      backgroundColor: isDark ? '#f59e0b' : '#fbbf24',
+      borderRadius: 8,
+      paddingVertical: 8,
+      alignItems: 'center',
+    },
+    savedRunResumeButtonText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: '#ffffff',
+    },
+
     // Section
     section: {
       marginBottom: 24,
@@ -497,70 +712,12 @@ function getStyles(isDark: boolean) {
       color: isDark ? '#818cf8' : '#3b82f6',
     },
 
-    // Cloud container - flex-row flex-wrap gap-2.5 p-4
+    // Cloud container
     cloudContainer: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 10,
       padding: 16,
-    },
-
-    // Cloud pill - gorgeous tactile capsule card
-    cloudPillLight: {
-      backgroundColor: '#ffffff',
-      borderWidth: 1,
-      borderColor: '#e4e4e7',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.08,
-      shadowRadius: 3,
-      elevation: 2,
-    },
-    cloudPillDark: {
-      backgroundColor: '#18181b',
-      borderWidth: 1,
-      borderColor: 'rgba(39, 39, 42, 0.8)',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1 },
-      shadowOpacity: 0.15,
-      shadowRadius: 3,
-      elevation: 2,
-    },
-    cloudPill: {
-      paddingHorizontal: 16,
-      paddingVertical: 10,
-      borderRadius: 12,
-    },
-    cloudPillPressed: {
-      transform: [{ scale: 0.95 }],
-    },
-    cloudPillContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-    // text-sm font-semibold text-zinc-800 dark:text-zinc-200
-    cloudPillNameLight: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#27272a',
-    },
-    cloudPillNameDark: {
-      fontSize: 14,
-      fontWeight: '600',
-      color: '#e4e4e7',
-    },
-    // text-xs font-bold text-blue-600 dark:text-blue-400 ml-1.5
-    cloudPillCountLight: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: '#2563eb',
-      marginLeft: 6,
-    },
-    cloudPillCountDark: {
-      fontSize: 12,
-      fontWeight: '700',
-      color: '#60a5fa',
-      marginLeft: 6,
     },
 
     // Card styles
@@ -623,6 +780,79 @@ function getStyles(isDark: boolean) {
       fontSize: 12,
       fontWeight: '500',
       color: isDark ? '#71717a' : '#a1a1aa',
+    },
+
+    // Action Sheet styles
+    actionSheetOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0, 0, 0, 0.5)',
+      justifyContent: 'flex-end',
+    },
+    actionSheetContent: {
+      backgroundColor: isDark ? '#18181b' : '#ffffff',
+      borderTopLeftRadius: 20,
+      borderTopRightRadius: 20,
+      paddingHorizontal: 20,
+      paddingBottom: 32,
+      paddingTop: 12,
+    },
+    actionSheetHandle: {
+      width: 36,
+      height: 4,
+      backgroundColor: isDark ? '#3f3f46' : '#d4d4d8',
+      borderRadius: 2,
+      alignSelf: 'center',
+      marginBottom: 16,
+    },
+    actionSheetTitle: {
+      fontSize: 18,
+      fontWeight: '700',
+      color: isDark ? '#fafafa' : '#18181b',
+      marginBottom: 8,
+      textAlign: 'center',
+    },
+    actionSheetButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      borderBottomWidth: 1,
+      borderBottomColor: isDark ? '#27272a' : '#e4e4e7',
+    },
+    actionSheetButtonIcon: {
+      fontSize: 20,
+      marginRight: 12,
+    },
+    actionSheetButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: isDark ? '#fafafa' : '#18181b',
+    },
+    actionSheetButtonDestructive: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 14,
+      marginTop: 8,
+      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.1)' : 'rgba(239, 68, 68, 0.05)',
+      borderRadius: 12,
+      paddingHorizontal: 12,
+    },
+    actionSheetButtonTextDestructive: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: '#ef4444',
+      marginLeft: 12,
+    },
+    actionSheetCancelButton: {
+      marginTop: 12,
+      paddingVertical: 14,
+      backgroundColor: isDark ? '#27272a' : '#f4f4f5',
+      borderRadius: 12,
+      alignItems: 'center',
+    },
+    actionSheetCancelButtonText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: isDark ? '#a1a1aa' : '#71717a',
     },
   });
 }

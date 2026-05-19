@@ -1,4 +1,4 @@
-// src/core/types.ts — V8.1 Dashboard View Modes & Backup Support
+// src/core/types.ts — V8.4 Multi-Instance Saved Runs & Enhanced Features
 
 export type ExecutionMode = 'linear' | 'parallel';
 
@@ -38,6 +38,8 @@ export interface RunInstance {
   startedAt: number;
   currentSteps: CompiledStep[];
   isFinished: boolean;
+  customName: string; // User-defined name for saved runs
+  expiresAt: number; // 24-hour expiry timestamp (required for saved runs)
 }
 
 export interface RunLog {
@@ -53,6 +55,7 @@ export interface FlightManualBackup {
   collections: Collection[];
   templates: Template[];
   historyLogs: RunLog[];
+  savedRuns?: RunInstance[]; // Include saved runs in backups
 }
 
 // App-wide Settings State

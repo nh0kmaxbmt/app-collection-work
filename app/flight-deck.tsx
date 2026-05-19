@@ -1,4 +1,4 @@
-// app/flight-deck.tsx — V6.1 Dynamic Execution Deck (Hook-Safe & Navigation-Robust)
+// app/flight-deck.tsx — V8.4 Save for Later with Custom Name & Conditional Validation
 import { Stack } from 'expo-router';
 import { useState, useCallback, useMemo } from 'react';
 import {
@@ -78,9 +78,9 @@ export default function FlightDeck() {
     completeRun,
     appendCollectionToActiveRun,
     saveActiveRunAsTemplate,
+    saveCurrentRunForLater,
   } = useFlightManual();
   const { activeRun, collections } = state;
-
 
   // ─── ALL HOOKS MUST BE DECLARED BEFORE ANY CONDITIONAL RETURNS ───
   const [appendModalVisible, setAppendModalVisible] = useState(false);
@@ -88,21 +88,22 @@ export default function FlightDeck() {
   const [saveTitle, setSaveTitle] = useState('');
   const [saveDescription, setSaveDescription] = useState('');
   const [appendSearch, setAppendSearch] = useState('');
+  const [saveForLaterModalVisible, setSaveForLaterModalVisible] = useState(false);
+  const [customRunName, setCustomRunName] = useState('');
 
   // Memoized values based on activeRun state
   const steps = activeRun?.currentSteps ?? [];
   const completedCount = steps.filter((s) => s.isCompleted).length;
   const totalCount = steps.length;
   const progress = totalCount > 0 ? completedCount / totalCount : 0;
+  const incompleteCount = totalCount - completedCount;
 
-
-    // Get the collection name for the header from the first group of steps, fallback if not available
+  // Get the collection name for the header from the first group of steps, fallback if not available
   const collectionName =
     steps.length > 0 && steps[0].parentTemplateName
       ? steps[0].parentTemplateName
       : 'Routine';
 
-  
   // Unique collection count for save guard
   const uniqueCollections = useMemo(
     () => new Set(steps.map((s) => s.parentTemplateName)),
@@ -180,23 +181,44 @@ export default function FlightDeck() {
     completeRun();
   };
 
+  // Save for Later - opens modal for custom name input
+  const handleSaveForLaterPress = () => {
+    if (!activeRun) return;
+    setSaveForLaterModalVisible(true);
+  };
+
+  const handleSaveForLaterConfirm = () => {
+    const trimmedName = customRunName.trim();
+    if (!trimmedName) {
+      Alert.alert('Error', 'Please enter a name for this saved run');
+      return;
+    }
+
+    saveCurrentRunForLater(trimmedName);
+    setCustomRunName('');
+    setSaveForLaterModalVisible(false);
+    router.replace('/');
+  };
+
+  const handleSaveForLaterCancel = () => {
+    setCustomRunName('');
+    setSaveForLaterModalVisible(false);
+  };
+
   // ─── CONDITIONAL RENDERING (after all hooks) ─────────────────────
   if (!activeRun) {
     return (
       <View style={styles.emptyContainer}>
-  // Stack.Screen for header display
-  // This MUST be before other hooks/returns for expo-router header
-  <Stack.Screen 
-        options={{ 
-          title: "New Collection",
-          headerShadowVisible: false,
-          // Optional: Match your beautiful dark/light adaptive styling
-          headerStyle: { 
-            backgroundColor: '#09090b' // Use your theme's color variable here
-          },
-          headerTintColor: '#f4f4f5' 
-        }} 
-      />
+        <Stack.Screen
+          options={{
+            title: "Flight Deck",
+            headerShadowVisible: false,
+            headerStyle: {
+              backgroundColor: '#030712',
+            },
+            headerTintColor: '#f4f4f5',
+          }}
+        />
 
         <Text style={styles.emptyText}>No active run</Text>
         <Pressable
@@ -209,13 +231,47 @@ export default function FlightDeck() {
     );
   }
 
+  // Condition: Disable "Save for Later" if no incomplete tasks remain
+  const canSaveForLater = incompleteCount > 0;
+
   return (
     <View style={styles.container}>
       {/* Header */}
+      <Stack.Screen
+        options={{
+          title: collectionName,
+          headerShadowVisible: false,
+          headerStyle: {
+            backgroundColor: '#030712',
+          },
+          headerTintColor: '#f4f4f5',
+          headerTitleStyle: {
+            color: '#ffffff',
+          },
+        }}
+      />
+
       <View style={styles.header}>
-        <Text style={styles.headerSubtitle}>
-          {completedCount} / {totalCount} complete
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Text style={styles.headerSubtitle}>
+            {completedCount} / {totalCount} complete
+          </Text>
+          <Pressable
+            onPress={handleSaveForLaterPress}
+            disabled={!canSaveForLater}
+            style={[
+              styles.headerSaveButton,
+              !canSaveForLater && styles.headerSaveButtonDisabled,
+            ]}
+          >
+            <Text style={[
+              styles.headerSaveButtonText,
+              !canSaveForLater && styles.headerSaveButtonTextDisabled,
+            ]}>
+              ⏱ Save for Later
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
@@ -277,7 +333,7 @@ export default function FlightDeck() {
         )}
       </ScrollView>
 
-      {/* Bottom progress bar + complete */}
+      {/* Bottom controls: Progress + Complete */}
       <View style={styles.bottomBar}>
         <View style={styles.progressContainer}>
           <AnimatedView style={progressStyle} />
@@ -302,7 +358,7 @@ export default function FlightDeck() {
           >
             {activeRun.isFinished
               ? 'Complete Run & Reset'
-              : `${totalCount - completedCount} steps remaining`}
+              : `${incompleteCount} steps remaining`}
           </Text>
         </Pressable>
       </View>
@@ -418,6 +474,57 @@ export default function FlightDeck() {
           </View>
         </View>
       </Modal>
+
+      {/* Save for Later Modal with Custom Name Input */}
+      <Modal
+        visible={saveForLaterModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={handleSaveForLaterCancel}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.saveForLaterModalContent}>
+            <Text style={styles.modalTitle}>Save for Later</Text>
+            <Text style={styles.saveForLaterDescription}>
+              Give this run a custom name to easily identify it later. Saved runs expire after 24 hours.
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="e.g., Morning Gym Session"
+              placeholderTextColor="#6b7280"
+              value={customRunName}
+              onChangeText={setCustomRunName}
+              autoFocus
+              maxLength={50}
+            />
+            <View style={styles.modalButtons}>
+              <Pressable
+                onPress={handleSaveForLaterCancel}
+                style={styles.modalCancelButton}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSaveForLaterConfirm}
+                disabled={!customRunName.trim()}
+                style={[
+                  styles.modalSaveButton,
+                  !customRunName.trim() ? styles.modalSaveButtonDisabled : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modalSaveButtonText,
+                    !customRunName.trim() ? styles.modalSaveButtonTextDisabled : null,
+                  ]}
+                >
+                  Save Run
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -462,6 +569,24 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     marginTop: 4,
     fontSize: 14,
+    color: '#6b7280',
+  },
+  headerSaveButton: {
+    backgroundColor: '#f59e0b',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  headerSaveButtonDisabled: {
+    backgroundColor: '#374151',
+    opacity: 0.3,
+  },
+  headerSaveButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#ffffff',
+  },
+  headerSaveButtonTextDisabled: {
     color: '#6b7280',
   },
   scrollContent: {
@@ -638,6 +763,20 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     paddingTop: 24,
   },
+  saveForLaterModalContent: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    backgroundColor: '#111827',
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+    paddingTop: 24,
+  },
+  saveForLaterDescription: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
   modalHeader: {
     marginBottom: 12,
     flexDirection: 'row' as const,
@@ -648,6 +787,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
     color: '#ffffff',
+    marginBottom: 16,
   },
   modalClose: {
     fontSize: 14,

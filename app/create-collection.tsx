@@ -1,6 +1,6 @@
-// app/create-collection.tsx — V8.0 Collection Creator (Updated Labels)
-import { Stack } from 'expo-router';
-import { useState } from 'react';
+// app/create-collection.tsx — V8.4 Drag-and-Drop Reordering & Keyboard Avoidance
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,13 +11,29 @@ import {
   Platform,
   StyleSheet,
   useColorScheme,
+  TouchableWithoutFeedback,
+  Keyboard,
+  PanResponder,
 } from 'react-native';
-import { router } from 'expo-router';
 import { useFlightManual } from '../src/core/store';
-import type { ExecutionMode } from '../src/core/types';
+import type { ExecutionMode, Collection } from '../src/core/types';
+
+interface DragState {
+  index: number | null;
+  y: number;
+  height: number;
+}
 
 export default function CreateCollection() {
-  const { saveCustomCollection } = useFlightManual();
+  const { saveCustomCollection, updateCollection, state } = useFlightManual();
+  const params = useLocalSearchParams<{ id: string }>();
+  const router = useRouter();
+
+  // Check if we're editing an existing collection
+  const editingId = params.id;
+  const existingCollection = editingId
+    ? state.collections.find((c) => c.id === editingId)
+    : null;
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -25,9 +41,72 @@ export default function CreateCollection() {
   const [stepTexts, setStepTexts] = useState<string[]>(['']);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('linear');
 
+  // Drag state
+  const [dragState, setDragState] = useState<DragState>({ index: null, y: 0, height: 0 });
+  const [dragPositions, setDragPositions] = useState<Record<number, number>>({});
+
   // Detect color scheme for adaptive theming
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+
+  // Populate form if editing
+  useEffect(() => {
+    if (existingCollection) {
+      setName(existingCollection.name);
+      setDescription(existingCollection.description || '');
+      setTagsInput(existingCollection.tags.join(', '));
+      setStepTexts(existingCollection.steps.map((s) => s.text));
+      setExecutionMode(existingCollection.executionMode);
+    }
+  }, [existingCollection]);
+
+  // Measure row positions for drag calculations
+  const measureRow = (index: number, event: any) => {
+    const { y, height } = event.nativeEvent.layout;
+    setDragPositions(prev => ({ ...prev, [index]: y }));
+  };
+
+  // Create pan responder for drag gesture
+  const createPanResponder = (index: number) => {
+    return PanResponder.create({
+      onStartShouldSetPanResponder: () => dragState.index === null,
+      onMoveShouldSetPanResponder: () => false,
+      onPanResponderGrant: () => {
+        setDragState({ index, y: dragPositions[index] || 0, height: 60 });
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const currentY = (dragPositions[index] || 0) + gestureState.dy;
+        setDragState(prev => prev.index === index ? { ...prev, y: currentY } : prev);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const currentY = (dragPositions[index] || 0) + gestureState.dy;
+
+        // Find which index we're over
+        let targetIndex = index;
+        for (let i = 0; i < stepTexts.length; i++) {
+          if (i === index) continue;
+          const rowY = dragPositions[i] || 0;
+          if (currentY > rowY && currentY < rowY + 60) {
+            targetIndex = i;
+            break;
+          }
+        }
+
+        // Reorder if target is different
+        if (targetIndex !== index && targetIndex >= 0 && targetIndex < stepTexts.length) {
+          setStepTexts(prev => {
+            const newItems = [...prev];
+            const [removed] = newItems.splice(index, 1);
+            newItems.splice(targetIndex, 0, removed);
+            return newItems;
+          });
+        }
+
+        // Reset drag state
+        setDragState({ index: null, y: 0, height: 0 });
+      },
+    });
+  };
 
   const addStep = () => setStepTexts((prev) => [...prev, '']);
 
@@ -43,6 +122,26 @@ export default function CreateCollection() {
     setStepTexts((prev) => prev.filter((_, i) => i !== index));
   };
 
+  // Move step up in array (decrease index)
+  const moveStepUp = (index: number) => {
+    if (index === 0) return; // Already at top
+    setStepTexts((prev) => {
+      const next = [...prev];
+      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+      return next;
+    });
+  };
+
+  // Move step down in array (increase index)
+  const moveStepDown = (index: number) => {
+    if (index === stepTexts.length - 1) return; // Already at bottom
+    setStepTexts((prev) => {
+      const next = [...prev];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next;
+    });
+  };
+
   const handleSave = async () => {
     const trimmedName = name.trim();
     const filledSteps = stepTexts.map((s) => s.trim()).filter((s) => s.length > 0);
@@ -53,15 +152,26 @@ export default function CreateCollection() {
       .map((t) => t.trim().toLowerCase())
       .filter((t) => t.length > 0);
 
-    // Save with execution mode
-    await saveCustomCollection(trimmedName, description.trim(), tags, filledSteps, executionMode);
-
-    // Reset form
-    setName('');
-    setDescription('');
-    setTagsInput('');
-    setStepTexts(['']);
-    setExecutionMode('linear');
+    if (editingId && existingCollection) {
+      // Update existing collection
+      await updateCollection(
+        editingId,
+        trimmedName,
+        description.trim(),
+        tags,
+        executionMode,
+        filledSteps,
+      );
+    } else {
+      // Create new collection
+      await saveCustomCollection(
+        trimmedName,
+        description.trim(),
+        tags,
+        filledSteps,
+        executionMode,
+      );
+    }
 
     router.back();
   };
@@ -71,7 +181,6 @@ export default function CreateCollection() {
   // Adaptive styles
   const adaptiveStyles = {
     container: isDark ? styles.containerDark : styles.containerLight,
-    headerTitle: isDark ? styles.headerTitleDark : styles.headerTitleLight,
     fieldLabel: isDark ? styles.fieldLabelDark : styles.fieldLabelLight,
     textInput: isDark ? styles.textInputDark : styles.textInputLight,
     placeholderText: isDark ? '#6b7280' : '#9ca3af',
@@ -84,6 +193,11 @@ export default function CreateCollection() {
     stepInput: isDark ? styles.stepInputDark : styles.stepInputLight,
     stepPlaceholderText: isDark ? '#6b7280' : '#9ca3af',
     removeButtonText: isDark ? styles.removeButtonTextDark : styles.removeButtonTextLight,
+    reorderButtonUp: isDark ? styles.reorderButtonDark : styles.reorderButtonLight,
+    reorderButtonDown: isDark ? styles.reorderButtonDark : styles.reorderButtonLight,
+    reorderButtonDisabled: styles.reorderButtonDisabled,
+    reorderButtonText: isDark ? styles.reorderButtonTextDark : styles.reorderButtonTextLight,
+    dragHandle: isDark ? styles.dragHandleDark : styles.dragHandleLight,
     addStepButtonText: isDark ? styles.addStepButtonTextDark : styles.addStepButtonTextLight,
     saveButtonActive: isDark ? styles.saveButtonActiveDark : styles.saveButtonActiveLight,
     saveButtonTextActive: isDark ? styles.saveButtonTextActiveDark : styles.saveButtonTextActiveLight,
@@ -94,143 +208,174 @@ export default function CreateCollection() {
   return (
     <KeyboardAvoidingView
       style={adaptiveStyles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 100 : 0}
     >
-      {/* 🔘 This locks the header title to your custom text */}
-      <Stack.Screen 
-        options={{ 
-          title: "New Collection",
+      {/* Configure header based on mode */}
+      <Stack.Screen
+        options={{
+          title: editingId ? 'Edit Collection' : 'Create Collection',
           headerShadowVisible: false,
-          // Optional: Match your beautiful dark/light adaptive styling
-          headerStyle: { 
-            backgroundColor: '#09090b' // Use your theme's color variable here
+          headerStyle: {
+            backgroundColor: isDark ? '#09090b' : '#ffffff',
           },
-          headerTintColor: '#f4f4f5' 
-        }} 
+          headerTintColor: isDark ? '#f4f4f5' : '#09090b',
+          headerTitleStyle: {
+            color: isDark ? '#f4f4f5' : '#09090b',
+            fontWeight: 'bold',
+          },
+        }}
       />
-      
-          <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
 
-        {/* Collection name (REQUIRED) */}
-        <View style={styles.fieldContainer}>
-          <View style={styles.labelRow}>
-            <Text style={adaptiveStyles.fieldLabel}>Collection Name</Text>
-            <Text style={styles.requiredAsterisk}> *</Text>
-          </View>
-          <TextInput
-            style={adaptiveStyles.textInput}
-            placeholder="e.g. Grocery Packing"
-            placeholderTextColor={adaptiveStyles.placeholderText}
-            value={name}
-            onChangeText={setName}
-          />
-        </View>
-
-        {/* Description (Optional) */}
-        <View style={styles.fieldContainer}>
-          <Text style={adaptiveStyles.fieldLabel}>Description (Optional)</Text>
-          <TextInput
-            style={adaptiveStyles.textInput}
-            placeholder="Brief description of this collection"
-            placeholderTextColor={adaptiveStyles.placeholderText}
-            value={description}
-            onChangeText={setDescription}
-          />
-        </View>
-
-        {/* Tags (Optional) */}
-        <View style={styles.fieldContainer}>
-          <Text style={adaptiveStyles.fieldLabel}>Tags (comma-separated) (Optional)</Text>
-          <TextInput
-            style={adaptiveStyles.textInput}
-            placeholder="e.g. errands, weekly"
-            placeholderTextColor={adaptiveStyles.placeholderText}
-            value={tagsInput}
-            onChangeText={setTagsInput}
-          />
-        </View>
-
-        {/* Execution Mode Selector - Updated Labels: Sequential/Flexible */}
-        <View style={styles.fieldContainer}>
-          <View style={styles.labelRow}>
-            <Text style={adaptiveStyles.fieldLabel}>Execution Mode</Text>
-            <Text style={styles.requiredAsterisk}> *</Text>
-          </View>
-          <View style={styles.executionModeContainer}>
-            <Pressable
-              onPress={() => setExecutionMode('linear')}
-              style={[
-                adaptiveStyles.executionModeButton,
-                executionMode === 'linear' ? adaptiveStyles.executionModeButtonSelected : null,
-              ]}
-            >
-              <Text
-                style={[
-                  adaptiveStyles.executionModeButtonText,
-                  executionMode === 'linear' ? adaptiveStyles.executionModeButtonTextSelected : null,
-                ]}
-              >
-                Sequential
-              </Text>
-              <Text style={adaptiveStyles.executionModeDescription}>
-                Complete steps in strict chronological order
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setExecutionMode('parallel')}
-              style={[
-                adaptiveStyles.executionModeButton,
-                executionMode === 'parallel' ? adaptiveStyles.executionModeButtonSelected : null,
-              ]}
-            >
-              <Text
-                style={[
-                  adaptiveStyles.executionModeButtonText,
-                  executionMode === 'parallel' ? adaptiveStyles.executionModeButtonTextSelected : null,
-                ]}
-              >
-                Flexible
-              </Text>
-              <Text style={adaptiveStyles.executionModeDescription}>
-                All steps available to check off in any order
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Step builder (REQUIRED) */}
-        <View style={styles.stepsContainer}>
-          <View style={styles.labelRow}>
-            <Text style={adaptiveStyles.fieldLabel}>Steps</Text>
-            <Text style={styles.requiredAsterisk}> *</Text>
-          </View>
-          {stepTexts.map((text, i) => (
-            <View key={i} style={styles.stepRow}>
-              <Text style={adaptiveStyles.stepNumber}>{i + 1}.</Text>
-              <TextInput
-                style={adaptiveStyles.stepInput}
-                placeholder={`Step ${i + 1}`}
-                placeholderTextColor={adaptiveStyles.stepPlaceholderText}
-                value={text}
-                onChangeText={(t) => updateStep(i, t)}
-              />
-              {stepTexts.length > 1 && (
-                <Pressable onPress={() => removeStep(i)} style={styles.removeButton}>
-                  <Text style={adaptiveStyles.removeButtonText}>Remove</Text>
-                </Pressable>
-              )}
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Collection name (REQUIRED) */}
+          <View style={styles.fieldContainer}>
+            <View style={styles.labelRow}>
+              <Text style={adaptiveStyles.fieldLabel}>Collection Name</Text>
+              <Text style={styles.requiredAsterisk}> *</Text>
             </View>
-          ))}
+            <TextInput
+              style={adaptiveStyles.textInput}
+              placeholder="e.g. Grocery Packing"
+              placeholderTextColor={adaptiveStyles.placeholderText}
+              value={name}
+              onChangeText={setName}
+            />
+          </View>
 
-          <Pressable onPress={addStep} style={styles.addStepButton}>
-            <Text style={adaptiveStyles.addStepButtonText}>+ Add Step</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+          {/* Description (Optional) */}
+          <View style={styles.fieldContainer}>
+            <Text style={adaptiveStyles.fieldLabel}>Description (Optional)</Text>
+            <TextInput
+              style={adaptiveStyles.textInput}
+              placeholder="Brief description of this collection"
+              placeholderTextColor={adaptiveStyles.placeholderText}
+              value={description}
+              onChangeText={setDescription}
+            />
+          </View>
+
+          {/* Tags (Optional) */}
+          <View style={styles.fieldContainer}>
+            <Text style={adaptiveStyles.fieldLabel}>Tags (comma-separated)</Text>
+            <TextInput
+              style={adaptiveStyles.textInput}
+              placeholder="e.g. errands, weekly"
+              placeholderTextColor={adaptiveStyles.placeholderText}
+              value={tagsInput}
+              onChangeText={setTagsInput}
+            />
+          </View>
+
+          {/* Execution Mode Selector */}
+          <View style={styles.fieldContainer}>
+            <View style={styles.labelRow}>
+              <Text style={adaptiveStyles.fieldLabel}>Execution Mode</Text>
+              <Text style={styles.requiredAsterisk}> *</Text>
+            </View>
+            <View style={styles.executionModeContainer}>
+              <Pressable
+                onPress={() => setExecutionMode('linear')}
+                style={[
+                  adaptiveStyles.executionModeButton,
+                  executionMode === 'linear' ? adaptiveStyles.executionModeButtonSelected : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    adaptiveStyles.executionModeButtonText,
+                    executionMode === 'linear' ? adaptiveStyles.executionModeButtonTextSelected : null,
+                  ]}
+                >
+                  Sequential
+                </Text>
+                <Text style={adaptiveStyles.executionModeDescription}>
+                  Complete steps in strict chronological order
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setExecutionMode('parallel')}
+                style={[
+                  adaptiveStyles.executionModeButton,
+                  executionMode === 'parallel' ? adaptiveStyles.executionModeButtonSelected : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    adaptiveStyles.executionModeButtonText,
+                    executionMode === 'parallel' ? adaptiveStyles.executionModeButtonTextSelected : null,
+                  ]}
+                >
+                  Flexible
+                </Text>
+                <Text style={adaptiveStyles.executionModeDescription}>
+                  All steps available to check off in any order
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Step builder (REQUIRED) */}
+          <View style={styles.stepsContainer}>
+            <View style={styles.labelRow}>
+              <Text style={adaptiveStyles.fieldLabel}>Steps</Text>
+              <Text style={styles.requiredAsterisk}> *</Text>
+            </View>
+            <View style={styles.stepsHelperText}>
+              <Text style={styles.stepsHelperTextContent}>
+                Drag the ≡ handle to reorder steps
+              </Text>
+            </View>
+            {stepTexts.map((text, i) => {
+              const isDragging = dragState.index === i;
+              const panHandlers = createPanResponder(i).panHandlers;
+
+              return (
+                <View
+                  key={i}
+                  onLayout={(e) => measureRow(i, e)}
+                  style={[
+                    styles.stepRow,
+                    isDragging && styles.stepRowDragging,
+                  ]}
+                >
+                  {/* Drag handle */}
+                  <View
+                    {...panHandlers}
+                    style={adaptiveStyles.dragHandle}
+                  >
+                    <Text style={styles.dragHandleIcon}>≡</Text>
+                  </View>
+
+                  <Text style={adaptiveStyles.stepNumber}>{i + 1}.</Text>
+                  <TextInput
+                    style={adaptiveStyles.stepInput}
+                    placeholder={`Step ${i + 1}`}
+                    placeholderTextColor={adaptiveStyles.stepPlaceholderText}
+                    value={text}
+                    onChangeText={(t) => updateStep(i, t)}
+                  />
+                  {stepTexts.length > 1 && (
+                    <Pressable onPress={() => removeStep(i)} style={styles.removeButton}>
+                      <Text style={adaptiveStyles.removeButtonText}>−</Text>
+                    </Pressable>
+               
+                  )}
+                </View>
+              );
+            })}
+
+            <Pressable onPress={addStep} style={styles.addStepButton}>
+              <Text style={adaptiveStyles.addStepButtonText}>+ Add Step</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </TouchableWithoutFeedback>
 
       {/* Save button */}
       <View style={[styles.footerContainer, adaptiveStyles.footerBorder]}>
@@ -248,7 +393,7 @@ export default function CreateCollection() {
               canSave ? adaptiveStyles.saveButtonTextActive : adaptiveStyles.saveButtonTextInactive,
             ]}
           >
-            Save Collection
+            {editingId ? 'Update Collection' : 'Save Collection'}
           </Text>
         </Pressable>
       </View>
@@ -273,18 +418,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 24,
     paddingBottom: 16,
-  },
-  headerTitleLight: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#18181b',
-    marginBottom: 24,
-  },
-  headerTitleDark: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fafafa',
-    marginBottom: 24,
   },
   fieldContainer: {
     marginBottom: 16,
@@ -386,20 +519,56 @@ const styles = StyleSheet.create({
   stepsContainer: {
     marginBottom: 16,
   },
+  stepsHelperText: {
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
+  stepsHelperTextContent: {
+    fontSize: 13,
+    color: '#6b7280',
+    fontStyle: 'italic',
+  },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 8,
+    backgroundColor: 'transparent',
+  },
+  stepRowDragging: {
+    opacity: 0.8,
+    zIndex: 1000,
+  },
+  dragHandleLight: {
+    width: 28,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f4f4f5',
+    borderRadius: 6,
+  },
+  dragHandleDark: {
+    width: 28,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#27272a',
+    borderRadius: 6,
+  },
+  dragHandleIcon: {
+    fontSize: 18,
+    fontWeight: '300',
+    color: '#9ca3af',
+    letterSpacing: -2,
   },
   stepNumberLight: {
-    width: 24,
+    width: 28,
     fontSize: 12,
     color: '#a1a1aa',
     textAlign: 'right',
   },
   stepNumberDark: {
-    width: 24,
+    width: 28,
     fontSize: 12,
     color: '#71717a',
     textAlign: 'right',
@@ -425,6 +594,34 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#fafafa',
+  },
+  reorderControls: {
+    flexDirection: 'column',
+    gap: 2,
+  },
+  reorderButton: {
+    width: 28,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+  },
+  reorderButtonLight: {
+    backgroundColor: '#f4f4f5',
+  },
+  reorderButtonDark: {
+    backgroundColor: '#27272a',
+  },
+  reorderButtonDisabled: {
+    opacity: 0.3,
+  },
+  reorderButtonTextLight: {
+    fontSize: 14,
+    color: '#71717a',
+  },
+  reorderButtonTextDark: {
+    fontSize: 14,
+    color: '#a1a1aa',
   },
   removeButton: {
     paddingHorizontal: 8,
