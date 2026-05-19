@@ -1,4 +1,4 @@
-// src/core/types.ts — V8.4 Multi-Instance Saved Runs & Enhanced Features
+// src/core/types.ts — V9.1 Multi-Instance Saved Runs & Enhanced Features with Conditional Deletion
 
 export type ExecutionMode = 'linear' | 'parallel';
 

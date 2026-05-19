@@ -1,4 +1,4 @@
-// src/core/store.tsx — V8.5 Centralized Config & Dynamic Expiry Integration
+// src/core/store.tsx — V9.1 Centralized Config & Dynamic Expiry Integration with Conditional Deletion
 import { createContext, useContext, useReducer, useEffect, useCallback, useState, type ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { APP_CONFIG, logConfigState } from './config';
@@ -130,7 +130,7 @@ type Action =
   | { type: 'HYDRATE'; payload: { collections: Collection[]; templates: Template[]; activeRun: RunInstance | null; savedRuns: RunInstance[]; historyLogs: RunLog[] } }
   | { type: 'START_RUN'; payload: RunInstance }
   | { type: 'TOGGLE_STEP'; payload: string }
-  | { type: 'COMPLETE_RUN'; payload: RunLog }
+  | { type: 'COMPLETE_RUN'; payload: { log: RunLog; savedRunId?: string } }
   | { type: 'APPEND_STEPS'; payload: CompiledStep[] }
   | { type: 'SAVE_TEMPLATE'; payload: Template }
   | { type: 'SAVE_COLLECTION'; payload: Collection }
@@ -285,12 +285,21 @@ function reducer(state: FlightState, action: Action): FlightState {
       };
     }
 
-    case 'COMPLETE_RUN':
+    case 'COMPLETE_RUN': {
+      const { log, savedRunId } = action.payload;
+
+      // Filter out the completed saved run if it came from the pending registry
+      const updatedSavedRuns = savedRunId
+        ? state.savedRuns.filter((sr) => sr.id !== savedRunId)
+        : state.savedRuns;
+
       return {
         ...state,
         activeRun: null,
-        historyLogs: [...state.historyLogs, action.payload],
+        historyLogs: [...state.historyLogs, log],
+        savedRuns: updatedSavedRuns,
       };
+    }
 
     case 'APPEND_STEPS': {
       if (!state.activeRun) return state;
@@ -347,20 +356,21 @@ function reducer(state: FlightState, action: Action): FlightState {
 
     case 'UPDATE_SAVED_RUN': {
       const { id, steps } = action.payload;
-      if (!state.activeRun?.savedRunId) return state;
+      // Find and update the saved run immutably in the savedRuns array
+      // This keeps the persisted entry alive while updating its progress
+      const updatedSavedRuns = state.savedRuns.map(savedRun =>
+        savedRun.id === id
+          ? {
+              ...savedRun,
+              currentSteps: steps.map(s => ({ ...s })),
+              savedAt: Date.now(),
+            }
+          : savedRun
+      );
 
-      // Find and update the saved run immutably
       return {
         ...state,
-        savedRuns: state.savedRuns.map(savedRun =>
-          savedRun.id === id
-            ? {
-                ...savedRun,
-                currentSteps: steps,
-                startedAt: Date.now(), // Update startedAt to reflect last activity
-              }
-            : savedRun
-        ),
+        savedRuns: updatedSavedRuns,
       };
     }
 
@@ -369,10 +379,13 @@ function reducer(state: FlightState, action: Action): FlightState {
         ...action.payload,
         savedRunId: action.payload.id, // Mark this run as resumed from saved list
       };
+      // CRITICAL: Keep the saved run in the savedRuns array!
+      // We NO LONGER filter it out. The saved run persists in the database
+      // while activeRun becomes a temporary working copy.
       return {
         ...state,
         activeRun: resumedRun,
-        savedRuns: state.savedRuns.filter(r => r.id !== action.payload.id),
+        // savedRuns remains unchanged - the original entry stays in the database
       };
     }
 
@@ -416,7 +429,7 @@ interface FlightContextValue {
   setViewMode: (mode: DashboardViewMode) => void;
   compileAndStartRun: (id: string, isTemplate: boolean) => void;
   toggleStep: (stepId: string) => void;
-  completeRun: () => void;
+  completeRun: (savedRunId?: string) => Promise<void>;
   appendCollectionToActiveRun: (collectionId: string) => void;
   saveActiveRunAsTemplate: (title: string, description: string) => Promise<void>;
   saveCustomCollection: (
@@ -437,7 +450,7 @@ interface FlightContextValue {
   deleteTemplate: (templateId: string) => Promise<void>;
   deleteCollection: (collectionId: string) => Promise<void>;
   saveCurrentRunForLater: (name: string) => void;
-  updateSavedRun: (id: string, steps: CompiledStep[]) => void;
+  updateSavedRun: (id: string, steps: CompiledStep[]) => Promise<void>;
   resumeSavedRun: (id: string) => void;
   deleteSavedRun: (runId: string) => void;
   clearActiveRun: () => void;
@@ -573,7 +586,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   // ─── Export/Import Data Management ────────────────────────
   const exportData = useCallback(async (): Promise<string> => {
     const backup: FlightManualBackup = {
-      version: '8.5.0',
+      version: '9.0.0',
       exportedAt: Date.now(),
       collections: state.collections,
       templates: state.templates,
@@ -761,16 +774,35 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'TOGGLE_STEP', payload: stepId });
   }, []);
 
-  const completeRun = useCallback(() => {
+  const completeRun = useCallback(async (savedRunId?: string) => {
     if (!state.activeRun) return;
-    dispatch({
-      type: 'COMPLETE_RUN',
-      payload: {
-        collectionId: 'combined_run',
-        timestamp: Date.now(),
-        durationMs: Date.now() - state.activeRun.startedAt,
-      },
-    });
+
+    const log: RunLog = {
+      collectionId: state.activeRun.currentSteps[0]?.parentTemplateName ?? 'unknown',
+      timestamp: Date.now(),
+      durationMs: Date.now() - state.activeRun.startedAt,
+    };
+
+    dispatch({ type: 'COMPLETE_RUN', payload: { log, savedRunId } });
+
+    // Immediate AsyncStorage commit for both logs and saved runs
+    try {
+      // Update run logs
+      const logsRaw = await AsyncStorage.getItem(KEYS.RUN_LOGS);
+      const existingLogs: RunLog[] = logsRaw ? JSON.parse(logsRaw) : [];
+      await AsyncStorage.setItem(KEYS.RUN_LOGS, JSON.stringify([...existingLogs, log]));
+
+      // If savedRunId provided, scrub it from saved runs
+      if (savedRunId) {
+        const savedRaw = await AsyncStorage.getItem(KEYS.SAVED_RUNS);
+        const savedRuns: RunInstance[] = savedRaw ? JSON.parse(savedRaw) : [];
+        const cleaned = savedRuns.filter((sr) => sr.id !== savedRunId);
+        await AsyncStorage.setItem(KEYS.SAVED_RUNS, JSON.stringify(cleaned));
+        console.log('[FlightManual] Completed saved run scrubbed from pending registry:', savedRunId);
+      }
+    } catch (e) {
+      console.error('[FlightManual] completeRun persist failed:', e);
+    }
   }, [state.activeRun]);
 
   const saveActiveRunAsTemplate = useCallback(
@@ -916,10 +948,39 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   }, [state.activeRun]);
 
   // Update a saved run (used when exiting a resumed run - autosaves progress in place)
-  const updateSavedRun = useCallback((id: string, steps: CompiledStep[]) => {
+  // CRITICAL: This persists the updated state immediately to AsyncStorage
+  // to ensure the saved run database stays in sync even if the app is killed.
+  // Plan 22: Fixed to ensure immediate physical storage write
+  const updateSavedRun = useCallback(async (id: string, steps: CompiledStep[]) => {
     if (!state.activeRun?.savedRunId) return;
-    dispatch({ type: 'UPDATE_SAVED_RUN', payload: { id, steps } });
-  }, [state.activeRun?.savedRunId]);
+
+    const savedRunId = state.activeRun.savedRunId;
+    const currentSteps = state.activeRun.currentSteps.map((s) => ({ ...s }));
+
+    // 1. Update React state via reducer (immutable)
+    dispatch({ type: 'UPDATE_SAVED_RUN', payload: { id: savedRunId, steps: currentSteps } });
+
+    // 2. Immediate AsyncStorage commit — don't rely on useEffect cycle
+    // This ensures hardware file-system persistence before navigation
+    try {
+      // Read raw string directly from AsyncStorage (no parsing yet)
+      const rawString = await AsyncStorage.getItem(KEYS.SAVED_RUNS);
+      const runs: RunInstance[] = rawString ? JSON.parse(rawString) : [];
+      const updated = runs.map((sr) =>
+        sr.id === savedRunId
+          ? {
+              ...sr,
+              currentSteps,
+              savedAt: Date.now(),
+            }
+          : sr
+      );
+      await safeSetItem(KEYS.SAVED_RUNS, updated);
+      console.log('[FlightManual] Saved run state persisted to AsyncStorage immediately');
+    } catch (e) {
+      console.error('[FlightManual] updateSavedRun persist failed:', e);
+    }
+  }, [state.activeRun]);
 
   // Resume a saved run by ID (sets savedRunId for back-guard detection)
   const resumeSavedRun = useCallback((id: string) => {

@@ -1,4 +1,4 @@
-// app/flight-deck.tsx — V8.5 Hardware Back Guard & Dual-Condition Exit Protection
+// app/flight-deck.tsx — V9.1 Hardware Back Guard & Dual-Condition Exit Protection with Conditional Deletion
 import { Stack } from 'expo-router';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
@@ -169,6 +169,14 @@ export default function FlightDeck() {
   // Check if this is a resumed saved run for back-guard logic
   const isFromSavedRun = !!activeRun?.savedRunId;
 
+  // Mutation delta check: determines if user has made any progress on this run
+  // Used to implement RULE B (untouched runs get instant exit without modal)
+  const isUntouched = activeRun?.currentSteps.filter(s => s.isCompleted).length === 0;
+
+  // Fully completed check: determines if all steps are done
+  // Used to implement RULE A-1 (completed resumed runs get finalized and scrubbed from pending)
+  const isFullyCompleted = activeRun?.currentSteps.filter(s => !s.isCompleted).length === 0;
+
   // ─── Handlers (defined before useEffect to avoid dependency issues) ─────
   const handleAppend = useCallback((collectionId: string) => {
     appendCollectionToActiveRun(collectionId);
@@ -188,15 +196,16 @@ export default function FlightDeck() {
     Alert.alert('Saved', 'Your routine has been saved successfully');
   }, [saveTitle, saveDescription, saveActiveRunAsTemplate]);
 
-  const handleComplete = useCallback(() => {
+  const handleComplete = useCallback(async () => {
     if (!activeRun) return;
 
-    // Complete the run first (clears activeRun via state update)
-    completeRun();
+    // Complete the run, passing savedRunId to scrub from pending registry if resumed
+    await completeRun(activeRun.savedRunId);
 
-    // Then navigate back - since activeRun is now null, beforeRemove will allow unmount
+    // Clear active run and navigate back
+    clearActiveRun();
     router.back();
-  }, [activeRun, completeRun, router]);
+  }, [activeRun, completeRun, clearActiveRun, router]);
 
   const handleSaveForLaterPress = useCallback(() => {
     if (!activeRun) return;
@@ -224,21 +233,32 @@ export default function FlightDeck() {
     setSaveForLaterModalVisible(false);
   }, []);
 
-  const handleExitSaveProgress = useCallback(() => {
-    if (!exitSaveName.trim()) {
-      Alert.alert('Name Required', 'Please enter a name to save your progress');
-      return;
+  // Unified exit save handler with conditional branch for resumed vs fresh runs
+  // CASE A (Resumed): Instant in-place update, no naming prompt
+  // CASE B (Fresh): Show naming input flow
+  const handleExitSaveProgress = useCallback(async () => {
+    if (!activeRun) return;
+
+    if (isFromSavedRun && activeRun.savedRunId) {
+      // CASE A: Resumed run — update in-place, no naming needed
+      await updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
+      clearActiveRun();
+      setExitModalVisible(false);
+      setShowExitSaveInput(false);
+      router.back();
+    } else {
+      // CASE B: Fresh run — require custom name
+      if (!exitSaveName.trim()) {
+        Alert.alert('Name Required', 'Please enter a name to save your progress');
+        return;
+      }
+      saveCurrentRunForLater(exitSaveName.trim());
+      setExitModalVisible(false);
+      setExitSaveName('');
+      setShowExitSaveInput(false);
+      router.back();
     }
-
-    // Save clears activeRun via state update
-    saveCurrentRunForLater(exitSaveName.trim());
-    setExitModalVisible(false);
-    setExitSaveName('');
-    setShowExitSaveInput(false);
-
-    // Navigate back - since activeRun is now null, beforeRemove will allow unmount
-    router.back();
-  }, [exitSaveName, saveCurrentRunForLater, router]);
+  }, [activeRun, isFromSavedRun, exitSaveName, updateSavedRun, clearActiveRun, saveCurrentRunForLater, router]);
 
   const handleExitAbandon = useCallback(() => {
     // Clear activeRun via state update
@@ -258,25 +278,37 @@ export default function FlightDeck() {
   }, []);
 
   // ─── Hardware Back Guard & Navigation Interception ─────────────
-  // NOTE: This useEffect implements conditional dual-condition back interception.
-  // The key insight is that we ONLY intercept when state.activeRun exists.
-  // Once the run is completed/saved/abandoned and activeRun is null, we allow
-  // native unmounting to proceed normally, preventing navigation deadlock.
+  // NOTE: This useEffect implements a 4-rule gate system for smart back navigation.
+  // RULE A-1: Resumed + 100% done → e.preventDefault, await completeRun(savedRunId), manual router.back()
+  // RULE A-2: Resumed + partially done → e.preventDefault, await updateSavedRun, manual router.back()
+  // RULE B: Fresh untouched runs → silent clear, no preventDefault, instant exit
+  // RULE C: Fresh dirty runs → preventDefault + show confirmation modal
   useEffect(() => {
-    const handleBackPress = () => {
+    const handleBackPress = async () => {
       if (!activeRun) return false;
 
-      if (isFromSavedRun) {
-        // CASE A: Resumed saved run → silent autosave + exit
-        if (activeRun.savedRunId) {
-          updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
+      // RULE A: Resumed Saved Runs — Halt native, branch by completion status
+      if (isFromSavedRun && activeRun.savedRunId) {
+        if (isFullyCompleted) {
+          // CASE A-1: All steps done → finalize as completed, scrub from pending
+          await completeRun(activeRun.savedRunId);
+        } else {
+          // CASE A-2: Partially done → update in-place as pending
+          await updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
         }
         clearActiveRun();
         router.back();
         return true;
       }
 
-      // CASE B: Fresh run → show exit confirmation modal
+      // RULE B: Fresh Untouched Runs → Silent clear + native exit (no preventDefault)
+      if (isUntouched) {
+        clearActiveRun();
+        router.back();
+        return true;
+      }
+
+      // RULE C: Fresh Dirty Runs → Show confirmation modal (with preventDefault)
       setExitModalVisible(true);
       return true;
     };
@@ -285,28 +317,41 @@ export default function FlightDeck() {
     const backSubscription = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
 
     // iOS swipe-back + header back button listener
-    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
+    const unsubscribe = navigation.addListener('beforeRemove', async (e) => {
       // CRITICAL: Check state FIRST before calling preventDefault
-      // If activeRun is already cleared/null, DO NOT call preventDefault.
-      // This allows native unmounting to proceed normally and prevents deadlock.
+      // If activeRun is already cleared/null, allow native unmounting
       if (!activeRun) {
         return;
       }
 
-      // Only block native transition if we have an active run to manage
-      e.preventDefault();
-
-      if (isFromSavedRun) {
-        // CASE A: Resumed saved run → silent autosave + exit
-        if (activeRun.savedRunId) {
-          updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
+      // RULE A: Resumed Saved Runs — halt native, branch by completion status
+      if (isFromSavedRun && activeRun.savedRunId) {
+        e.preventDefault();
+        if (isFullyCompleted) {
+          // CASE A-1: All steps done → finalize as completed, scrub from pending
+          await completeRun(activeRun.savedRunId);
+        } else {
+          // CASE A-2: Partially done → update in-place as pending
+          await updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
         }
-        clearActiveRun(); // Ensure state is cleared to unblock subsequent triggers
+        clearActiveRun();
         router.back();
-      } else {
-        // CASE B: Fresh run → show exit confirmation modal
-        setExitModalVisible(true);
+        return;
       }
+
+      // RULE B: Fresh Untouched Runs → Silent clear + native exit (no preventDefault)
+      if (isUntouched) {
+        // Do NOT call preventDefault - let native unmount happen
+        // Just clear state and let it exit naturally
+        clearActiveRun();
+        router.back();
+        return;
+      }
+
+      // RULE C: Fresh Dirty Runs → Intercept and show modal (with preventDefault)
+      // Only block native transition for runs with user progress
+      e.preventDefault();
+      setExitModalVisible(true);
     });
 
     // Cleanup listeners on unmount
@@ -314,7 +359,7 @@ export default function FlightDeck() {
       backSubscription.remove();
       unsubscribe();
     };
-  }, [activeRun, isFromSavedRun, navigation, updateSavedRun, clearActiveRun, router]);
+  }, [activeRun, isFromSavedRun, isUntouched, isFullyCompleted, navigation, completeRun, updateSavedRun, clearActiveRun, router]);
 
   // ─── CONDITIONAL RENDERING (after all hooks) ─────────────────────
   if (!activeRun) {
@@ -634,7 +679,7 @@ export default function FlightDeck() {
         </View>
       </Modal>
 
-      {/* Exit Confirmation Modal - Dual-Condition Back Guard */}
+      {/* Exit Confirmation Modal - Dual-Condition Back Guard with Branch Logic */}
       <Modal
         visible={exitModalVisible}
         animationType="fade"
@@ -643,20 +688,24 @@ export default function FlightDeck() {
       >
         <View style={styles.exitModalOverlay}>
           <View style={styles.exitModalContent}>
-            <Text style={styles.exitModalTitle}>Leave Flight Deck?</Text>
+            <Text style={styles.exitModalTitle}>
+              {isFromSavedRun ? 'Save Changes?' : 'Leave Flight Deck?'}
+            </Text>
             <Text style={styles.exitModalDescription}>
-              You have an active run in progress with {incompleteCount} step{incompleteCount !== 1 ? 's' : ''} remaining.
+              {isFromSavedRun
+                ? 'Your progress will be updated in-place.'
+                : `You have an active run in progress with ${incompleteCount} step${incompleteCount !== 1 ? 's' : ''} remaining.`}
             </Text>
 
             {/* Option 1: Save Progress */}
-            {!showExitSaveInput ? (
+            {!isFromSavedRun && !showExitSaveInput ? (
               <Pressable
                 onPress={() => setShowExitSaveInput(true)}
                 style={styles.exitModalButtonPrimary}
               >
                 <Text style={styles.exitModalButtonTextPrimary}>💾 Save Progress for Later</Text>
               </Pressable>
-            ) : (
+            ) : !isFromSavedRun && showExitSaveInput ? (
               <View style={styles.exitModalSaveInputContainer}>
                 <TextInput
                   style={styles.exitModalInput}
@@ -678,6 +727,16 @@ export default function FlightDeck() {
                   <Text style={styles.exitModalButtonTextPrimary}>Save & Exit</Text>
                 </Pressable>
               </View>
+            ) : null}
+
+            {/* CASE A: Resumed run — direct save button, no naming input */}
+            {isFromSavedRun && (
+              <Pressable
+                onPress={handleExitSaveProgress}
+                style={styles.exitModalButtonPrimary}
+              >
+                <Text style={styles.exitModalButtonTextPrimary}>Save & Exit</Text>
+              </Pressable>
             )}
 
             {/* Option 2: Abandon Run */}
