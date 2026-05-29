@@ -19,6 +19,7 @@ import Animated, {
   Layout,
 } from 'react-native-reanimated';
 import { useFlightManual } from '../src/core/store';
+import { APP_CONFIG } from '../src/core/config';
 import type { CompiledStep } from '../src/core/types';
 
 const AnimatedView = Animated.View;
@@ -190,6 +191,11 @@ export default function FlightDeck() {
   // Used to implement RULE A-1 (completed resumed runs get finalized and scrubbed from pending)
   const isFullyCompleted = activeRun?.currentSteps.filter(s => !s.isCompleted).length === 0;
 
+  // Check if active run belongs to a recurring collection (for Rule D)
+  const isRecurringRun = activeRun?.collectionId
+    ? collections.find((c) => c.id === activeRun.collectionId)?.isRecurring ?? false
+    : false;
+
   // ─── Handlers (defined before useEffect to avoid dependency issues) ─────
   const handleAppend = useCallback((collectionId: string) => {
     appendCollectionToActiveRun(collectionId);
@@ -212,13 +218,21 @@ export default function FlightDeck() {
   const handleComplete = useCallback(async () => {
     if (!activeRun) return;
 
-    // Complete the run, passing savedRunId to scrub from pending registry if resumed
+    // Rule D: Recurring runs get saved with completion date instead of being finalized
+    if (isRecurringRun && activeRun.savedRunId) {
+      await updateSavedRun(activeRun.savedRunId, activeRun.currentSteps, APP_CONFIG.getLogicalDate());
+      clearActiveRun();
+      router.back();
+      return;
+    }
+
+    // Standard flow: Complete the run, passing savedRunId to scrub from pending registry if resumed
     await completeRun(activeRun.savedRunId);
 
     // Clear active run and navigate back
     clearActiveRun();
     router.back();
-  }, [activeRun, completeRun, clearActiveRun, router]);
+  }, [activeRun, completeRun, clearActiveRun, router, isRecurringRun, updateSavedRun]);
 
   const handleSaveForLaterPress = useCallback(() => {
     if (!activeRun) return;
@@ -291,26 +305,48 @@ export default function FlightDeck() {
   }, []);
 
   // ─── Hardware Back Guard & Navigation Interception ─────────────
-  // NOTE: This useEffect implements a 4-rule gate system for smart back navigation.
+  // NOTE: This useEffect implements a 5-rule gate system for smart back navigation.
   // RULE A-1: Resumed + 100% done → e.preventDefault, await completeRun(savedRunId), manual router.back()
   // RULE A-2: Resumed + partially done → e.preventDefault, await updateSavedRun, manual router.back()
   // RULE B: Fresh untouched runs → silent clear, no preventDefault, instant exit
   // RULE C: Fresh dirty runs → preventDefault + show confirmation modal
+  // RULE D: Recurring runs → silent save with no modals
   useEffect(() => {
-    const handleBackPress = async () => {
+    const handleBackPress = () => {
       if (!activeRun) return false;
+
+      // RULE D: Recurring Runs — Silent save with no modals
+      if (isRecurringRun && activeRun.savedRunId) {
+        (async () => {
+          const savedId = activeRun.savedRunId!;
+          if (isFullyCompleted) {
+            // Mark completion date for recurring runs
+            await updateSavedRun(savedId, activeRun.currentSteps, APP_CONFIG.getLogicalDate());
+          } else {
+            // Partial progress - update in place
+            await updateSavedRun(savedId, activeRun.currentSteps);
+          }
+          clearActiveRun();
+          router.back();
+        })();
+        return true;
+      }
 
       // RULE A: Resumed Saved Runs — Halt native, branch by completion status
       if (isFromSavedRun && activeRun.savedRunId) {
-        if (isFullyCompleted) {
-          // CASE A-1: All steps done → finalize as completed, scrub from pending
-          await completeRun(activeRun.savedRunId);
-        } else {
-          // CASE A-2: Partially done → update in-place as pending
-          await updateSavedRun(activeRun.savedRunId, activeRun.currentSteps);
-        }
-        clearActiveRun();
-        router.back();
+        // Launch async handler without blocking the return
+        (async () => {
+          const savedId = activeRun.savedRunId!;
+          if (isFullyCompleted) {
+            // CASE A-1: All steps done → finalize as completed, scrub from pending
+            await completeRun(savedId);
+          } else {
+            // CASE A-2: Partially done → update in-place as pending
+            await updateSavedRun(savedId, activeRun.currentSteps);
+          }
+          clearActiveRun();
+          router.back();
+        })();
         return true;
       }
 
@@ -334,6 +370,22 @@ export default function FlightDeck() {
       // CRITICAL: Check state FIRST before calling preventDefault
       // If activeRun is already cleared/null, allow native unmounting
       if (!activeRun) {
+        return;
+      }
+
+      // RULE D: Recurring Runs — Silent save with no modals
+      if (isRecurringRun && activeRun.savedRunId) {
+        e.preventDefault();
+        const savedId = activeRun.savedRunId!;
+        if (isFullyCompleted) {
+          // Mark completion date for recurring runs
+          await updateSavedRun(savedId, activeRun.currentSteps, APP_CONFIG.getLogicalDate());
+        } else {
+          // Partial progress - update in place
+          await updateSavedRun(savedId, activeRun.currentSteps);
+        }
+        clearActiveRun();
+        router.back();
         return;
       }
 
@@ -372,7 +424,7 @@ export default function FlightDeck() {
       backSubscription.remove();
       unsubscribe();
     };
-  }, [activeRun, isFromSavedRun, isUntouched, isFullyCompleted, navigation, completeRun, updateSavedRun, clearActiveRun, router, collections]);
+  }, [activeRun, isFromSavedRun, isUntouched, isFullyCompleted, isRecurringRun, navigation, completeRun, updateSavedRun, clearActiveRun, router, collections]);
 
   // ─── CONDITIONAL RENDERING (after all hooks) ─────────────────────
   if (!activeRun) {

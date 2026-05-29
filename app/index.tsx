@@ -36,6 +36,7 @@ export default function Dashboard() {
     viewMode,
     resumeSavedRun,
     deleteSavedRun,
+    clearAllSavedRuns,
     getSavedRunExpiryHours,
   } = useFlightManual();
   const [sortMode, setSortMode] = useState<SortMode>('recent');
@@ -133,6 +134,21 @@ export default function Dashboard() {
           text: 'Delete',
           style: 'destructive',
           onPress: () => deleteSavedRun(run.id),
+        },
+      ],
+    );
+  };
+
+  const handleClearAllSavedRuns = () => {
+    Alert.alert(
+      'Clear All Saved Runs',
+      `Are you sure you want to delete all ${validSavedRuns.length} saved run${validSavedRuns.length !== 1 ? 's' : ''}? This action cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear All',
+          style: 'destructive',
+          onPress: () => clearAllSavedRuns(),
         },
       ],
     );
@@ -449,7 +465,12 @@ export default function Dashboard() {
           {/* Multi-Banner: Saved Runs Horizontal Scroll */}
           {validSavedRuns.length > 0 && (
             <View style={styles.savedRunsSection}>
-              <Text style={styles.savedRunsTitle}>⏸ Saved Runs</Text>
+              <View style={styles.savedRunsHeader}>
+                <Text style={styles.savedRunsTitle}>⏸ Saved Runs</Text>
+                <Pressable onPress={handleClearAllSavedRuns} style={styles.clearAllButton}>
+                  <Text style={styles.clearAllButtonText}>Clear All</Text>
+                </Pressable>
+              </View>
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -638,12 +659,28 @@ function getStyles(isDark: boolean) {
     savedRunsSection: {
       marginBottom: 16,
     },
-    savedRunsTitle: {
+    savedRunsHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       paddingHorizontal: 16,
       marginBottom: 8,
+    },
+    savedRunsTitle: {
       fontSize: 14,
       fontWeight: '700',
       color: isDark ? '#f59e0b' : '#d97706',
+    },
+    clearAllButton: {
+      paddingHorizontal: 12,
+      paddingVertical: 4,
+      borderRadius: 6,
+      backgroundColor: isDark ? 'rgba(239, 68, 68, 0.15)' : 'rgba(239, 68, 68, 0.1)',
+    },
+    clearAllButtonText: {
+      fontSize: 13,
+      fontWeight: '600',
+      color: isDark ? '#f87171' : '#dc2626',
     },
     savedRunsScrollContent: {
       paddingHorizontal: 16,

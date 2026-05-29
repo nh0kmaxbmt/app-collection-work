@@ -1,4 +1,4 @@
-// app/create-collection.tsx — V8.4 Drag-and-Drop Reordering & Keyboard Avoidance
+// app/create-collection.tsx — V8.4 Drag-and-Drop Reordering & Keyboard Avoidance with Recurring Toggle
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import {
@@ -14,6 +14,7 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   PanResponder,
+  Switch,
 } from 'react-native';
 import { useFlightManual } from '../src/core/store';
 import type { ExecutionMode, Collection } from '../src/core/types';
@@ -40,6 +41,7 @@ export default function CreateCollection() {
   const [tagsInput, setTagsInput] = useState('');
   const [stepTexts, setStepTexts] = useState<string[]>(['']);
   const [executionMode, setExecutionMode] = useState<ExecutionMode>('linear');
+  const [isRecurring, setIsRecurring] = useState(false);
 
   // Drag state
   const [dragState, setDragState] = useState<DragState>({ index: null, y: 0, height: 0 });
@@ -57,6 +59,7 @@ export default function CreateCollection() {
       setTagsInput(existingCollection.tags.join(', '));
       setStepTexts(existingCollection.steps.map((s) => s.text));
       setExecutionMode(existingCollection.executionMode);
+      setIsRecurring(existingCollection.isRecurring || false);
     }
   }, [existingCollection]);
 
@@ -161,6 +164,7 @@ export default function CreateCollection() {
         tags,
         executionMode,
         filledSteps,
+        isRecurring,
       );
     } else {
       // Create new collection
@@ -170,6 +174,7 @@ export default function CreateCollection() {
         tags,
         filledSteps,
         executionMode,
+        isRecurring,
       );
     }
 
@@ -203,6 +208,8 @@ export default function CreateCollection() {
     saveButtonTextActive: isDark ? styles.saveButtonTextActiveDark : styles.saveButtonTextActiveLight,
     saveButtonTextInactive: isDark ? styles.saveButtonTextInactiveDark : styles.saveButtonTextInactiveLight,
     footerBorder: isDark ? styles.footerBorderDark : styles.footerBorderLight,
+    recurringCard: isDark ? styles.recurringCardDark : styles.recurringCardLight,
+    recurringDescription: isDark ? styles.recurringDescriptionDark : styles.recurringDescriptionLight,
   };
 
   return (
@@ -258,6 +265,25 @@ export default function CreateCollection() {
               value={description}
               onChangeText={setDescription}
             />
+          </View>
+
+          {/* Daily Recurring Routine Toggle */}
+          <View style={[styles.fieldContainer, adaptiveStyles.recurringCard]}>
+            <View style={styles.recurringContent}>
+              <View style={styles.recurringTextContainer}>
+                <Text style={adaptiveStyles.fieldLabel}>🔁 Daily Recurring Routine</Text>
+                <Text style={adaptiveStyles.recurringDescription}>
+                  Automatically resets and regenerates a fresh blank list at the start of each day.
+                </Text>
+              </View>
+              <Switch
+                value={isRecurring}
+                onValueChange={setIsRecurring}
+                trackColor={{ false: '#3f3f46', true: '#22c55e' }}
+                thumbColor={isRecurring ? '#ffffff' : '#f4f4f5'}
+                ios_backgroundColor="#3f3f46"
+              />
+            </View>
           </View>
 
           {/* Tags (Optional) */}
@@ -421,6 +447,43 @@ const styles = StyleSheet.create({
   },
   fieldContainer: {
     marginBottom: 16,
+  },
+  recurringCardLight: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e4e4e7',
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  recurringCardDark: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    backgroundColor: '#18181b',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  recurringContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  recurringTextContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  recurringDescriptionLight: {
+    fontSize: 13,
+    color: '#a1a1aa',
+    marginTop: 4,
+    lineHeight: 18,
+  },
+  recurringDescriptionDark: {
+    fontSize: 13,
+    color: '#71717a',
+    marginTop: 4,
+    lineHeight: 18,
   },
   labelRow: {
     flexDirection: 'row',

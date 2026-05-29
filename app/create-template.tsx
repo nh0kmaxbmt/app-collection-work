@@ -52,8 +52,8 @@ export default function CreateCollection() {
       .map((t) => t.trim().toLowerCase())
       .filter((t) => t.length > 0);
 
-    // Save with execution mode
-    await saveCustomCollection(trimmedName, description.trim(), tags, filledSteps, executionMode);
+    // Save with execution mode and recurring flag (default false for templates)
+    await saveCustomCollection(trimmedName, description.trim(), tags, filledSteps, executionMode, false);
 
     // Reset form
     setName('');

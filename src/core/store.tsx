@@ -134,13 +134,14 @@ type Action =
   | { type: 'APPEND_STEPS'; payload: CompiledStep[] }
   | { type: 'SAVE_TEMPLATE'; payload: Template }
   | { type: 'SAVE_COLLECTION'; payload: Collection }
-  | { type: 'UPDATE_COLLECTION'; payload: { id: string; name: string; description: string; tags: string[]; executionMode: ExecutionMode; steps: Step[] } }
+  | { type: 'UPDATE_COLLECTION'; payload: { id: string; name: string; description: string; tags: string[]; executionMode: ExecutionMode; steps: Step[]; isRecurring: boolean } }
   | { type: 'DELETE_TEMPLATE'; payload: string }
   | { type: 'DELETE_COLLECTION'; payload: string }
   | { type: 'SAVE_RUN_FOR_LATER'; payload: { run: RunInstance; name: string } }
-  | { type: 'UPDATE_SAVED_RUN'; payload: { id: string; steps: CompiledStep[] } }
+  | { type: 'UPDATE_SAVED_RUN'; payload: { id: string; steps: CompiledStep[]; completedAtLogicalDate?: string } }
   | { type: 'RESUME_SPECIFIC_RUN'; payload: RunInstance }
   | { type: 'DELETE_SAVED_RUN'; payload: string }
+  | { type: 'CLEAR_ALL_SAVED_RUNS' }
   | { type: 'CLEAR_ACTIVE_RUN' }
   | { type: 'CLEAR_EXPIRED_RUNS' }
   | { type: 'REPLACE_ALL_DATA'; payload: { collections: Collection[]; templates: Template[]; historyLogs: RunLog[] } };
@@ -320,12 +321,12 @@ function reducer(state: FlightState, action: Action): FlightState {
       return { ...state, collections: [...state.collections, action.payload] };
 
     case 'UPDATE_COLLECTION': {
-      const { id, name, description, tags, executionMode, steps } = action.payload;
+      const { id, name, description, tags, executionMode, steps, isRecurring } = action.payload;
       return {
         ...state,
         collections: state.collections.map(col =>
           col.id === id
-            ? { ...col, name, description, tags, executionMode, steps }
+            ? { ...col, name, description, tags, executionMode, steps, isRecurring }
             : col
         ),
       };
@@ -355,7 +356,7 @@ function reducer(state: FlightState, action: Action): FlightState {
     }
 
     case 'UPDATE_SAVED_RUN': {
-      const { id, steps } = action.payload;
+      const { id, steps, completedAtLogicalDate } = action.payload;
       // Find and update the saved run immutably in the savedRuns array
       // This keeps the persisted entry alive while updating its progress
       const updatedSavedRuns = state.savedRuns.map(savedRun =>
@@ -363,7 +364,8 @@ function reducer(state: FlightState, action: Action): FlightState {
           ? {
               ...savedRun,
               currentSteps: steps.map(s => ({ ...s })),
-              savedAt: Date.now(),
+              ...(completedAtLogicalDate && { completedAtLogicalDate }),
+              isFinished: steps.every(s => s.isCompleted),
             }
           : savedRun
       );
@@ -393,6 +395,12 @@ function reducer(state: FlightState, action: Action): FlightState {
       return {
         ...state,
         savedRuns: state.savedRuns.filter(r => r.id !== action.payload),
+      };
+
+    case 'CLEAR_ALL_SAVED_RUNS':
+      return {
+        ...state,
+        savedRuns: [],
       };
 
     case 'CLEAR_ACTIVE_RUN':
@@ -427,7 +435,7 @@ interface FlightContextValue {
   state: FlightState;
   viewMode: DashboardViewMode;
   setViewMode: (mode: DashboardViewMode) => void;
-  compileAndStartRun: (id: string, isTemplate: boolean) => void;
+  compileAndStartRun: (id: string, isTemplate: boolean, options?: { isRecurringSpawn?: boolean; logicalDate?: string; expiresAt?: number | null }) => void;
   toggleStep: (stepId: string) => void;
   completeRun: (savedRunId?: string) => Promise<void>;
   appendCollectionToActiveRun: (collectionId: string) => void;
@@ -438,6 +446,7 @@ interface FlightContextValue {
     tags: string[],
     stepTexts: string[],
     executionMode: ExecutionMode,
+    isRecurring: boolean,
   ) => Promise<void>;
   updateCollection: (
     id: string,
@@ -446,13 +455,15 @@ interface FlightContextValue {
     tags: string[],
     executionMode: ExecutionMode,
     stepTexts: string[],
+    isRecurring: boolean,
   ) => Promise<void>;
   deleteTemplate: (templateId: string) => Promise<void>;
   deleteCollection: (collectionId: string) => Promise<void>;
   saveCurrentRunForLater: (name: string) => void;
-  updateSavedRun: (id: string, steps: CompiledStep[]) => Promise<void>;
+  updateSavedRun: (id: string, steps: CompiledStep[], completedAtLogicalDate?: string) => Promise<void>;
   resumeSavedRun: (id: string) => void;
   deleteSavedRun: (runId: string) => void;
+  clearAllSavedRuns: () => void;
   clearActiveRun: () => void;
   isRunExpired: () => boolean;
   getRunExpiryHours: () => number;
@@ -573,6 +584,60 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
     })();
   }, [state.collections, state.templates, state.activeRun, state.savedRuns, state.historyLogs, state.isLoading]);
 
+  // ─── Daily Recurring Routine Synchronization Check ────────
+  // Syncs recurring routines on app boot: spawn fresh, roll over incomplete, or reset completed
+  // IMPORTANT: Only depends on state.collections and state.isLoading to avoid infinite loops
+  // When a new recurring run is spawned, it updates savedRuns, which should NOT re-trigger this effect
+  useEffect(() => {
+    if (state.isLoading) return;
+
+    (async () => {
+      try {
+        const currentLogicalDate = APP_CONFIG.getLogicalDate();
+        const recurringCollections = state.collections.filter(c => c.isRecurring === true);
+
+        if (recurringCollections.length === 0) return;
+
+        console.log('[FlightManual] Syncing recurring routines for logical date:', currentLogicalDate);
+
+        for (const collection of recurringCollections) {
+          // Find existing run instance for this collection (non-expiring runs are recurring)
+          const existingRun = state.savedRuns.find(
+            r => r.collectionId === collection.id && !r.expiresAt
+          );
+
+          if (!existingRun) {
+            // CASE 1: No active instance exists - Spawn Fresh Run Instance
+            console.log('[FlightManual] Spawning fresh recurring run for:', collection.name);
+            await compileAndStartRun(collection.id, false, {
+              isRecurringSpawn: true,
+              logicalDate: currentLogicalDate,
+              expiresAt: null
+            });
+          } else if (existingRun.isFinished) {
+            // CASE 3: Instance exists and is 100% complete
+            const completionDate = existingRun.completedAtLogicalDate;
+
+            if (completionDate && completionDate < currentLogicalDate) {
+              // New logical day has arrived - Purge old run & Spawn fresh empty run
+              console.log('[FlightManual] New logical day, resetting completed recurring run:', collection.name);
+              dispatch({ type: 'DELETE_SAVED_RUN', payload: existingRun.id });
+              await compileAndStartRun(collection.id, false, {
+                isRecurringSpawn: true,
+                logicalDate: currentLogicalDate,
+                expiresAt: null
+              });
+            }
+            // Else: Completed today - Leave Visible on Screen (shows achievement)
+          }
+          // CASE 2: Instance exists, progress < 100% - Leave Untouched (rolls over)
+        }
+      } catch (error) {
+        console.error('[FlightManual] Recurring routine sync failed:', error);
+      }
+    })();
+  }, [state.collections, state.isLoading]);
+
   // ─── View Mode Management ─────────────────────────────────
   const setViewMode = useCallback(async (mode: DashboardViewMode) => {
     setViewModeState(mode);
@@ -682,8 +747,14 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ─── Actions ──────────────────────────────────────────────
+  interface RunSpawnOptions {
+    isRecurringSpawn?: boolean;
+    logicalDate?: string;
+    expiresAt?: number | null;
+  }
+
   const compileAndStartRun = useCallback(
-    (id: string, isTemplate: boolean) => {
+    (id: string, isTemplate: boolean, options?: RunSpawnOptions) => {
       let collectionIds: string[] = [];
       let primaryCollectionId: string | undefined;
 
@@ -725,15 +796,34 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         compiledSteps.push(...steps);
       }
 
+      const runPayload: RunInstance = {
+        id: `run_${Date.now()}`,
+        collectionId: primaryCollectionId,
+        startedAt: Date.now(),
+        currentSteps: compiledSteps,
+        isFinished: false,
+        // Add recurring-specific fields
+        ...(options?.logicalDate && { logicalDate: options.logicalDate }),
+        ...(options?.expiresAt !== undefined && { expiresAt: options.expiresAt ?? undefined }),
+      };
+
+      // For recurring spawns, save directly to savedRuns instead of activeRun
+      if (options?.isRecurringSpawn) {
+        const savedRunId = `saved_${Date.now()}`;
+        const customName = state.collections.find(c => c.id === id)?.name || 'Recurring Routine';
+        const savedRun: RunInstance = {
+          ...runPayload,
+          id: savedRunId,
+          customName,
+        };
+        dispatch({ type: 'SAVE_RUN_FOR_LATER', payload: { run: savedRun, name: customName } });
+        return;
+      }
+
+      // Standard flow: set as active run
       dispatch({
         type: 'START_RUN',
-        payload: {
-          id: `run_${Date.now()}`,
-          collectionId: primaryCollectionId, // NEW: Track source collection for baseline comparison
-          startedAt: Date.now(),
-          currentSteps: compiledSteps,
-          isFinished: false,
-        },
+        payload: runPayload,
       });
     },
     [state.collections, state.templates],
@@ -846,6 +936,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
       tags: string[],
       stepTexts: string[],
       executionMode: ExecutionMode,
+      isRecurring: boolean,
     ) => {
       const id = `col_${Date.now()}`;
 
@@ -864,6 +955,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         tags,
         executionMode,
         steps,
+        isRecurring,
       };
       dispatch({ type: 'SAVE_COLLECTION', payload: collection });
 
@@ -885,6 +977,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
       tags: string[],
       executionMode: ExecutionMode,
       stepTexts: string[],
+      isRecurring: boolean,
     ) => {
       // Rebuild steps array from texts
       const steps: Step[] = stepTexts.map((text, i) => ({
@@ -897,14 +990,14 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
 
       dispatch({
         type: 'UPDATE_COLLECTION',
-        payload: { id, name, description, tags, executionMode, steps },
+        payload: { id, name, description, tags, executionMode, steps, isRecurring },
       });
 
       // Persist to AsyncStorage
       try {
         const updatedCollections = state.collections.map(col =>
           col.id === id
-            ? { ...col, name, description, tags, executionMode, steps }
+            ? { ...col, name, description, tags, executionMode, steps, isRecurring }
             : col
         );
         await safeSetItem(KEYS.COLLECTIONS, updatedCollections);
@@ -955,14 +1048,14 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   // CRITICAL: This persists the updated state immediately to AsyncStorage
   // to ensure the saved run database stays in sync even if the app is killed.
   // Plan 22: Fixed to ensure immediate physical storage write
-  const updateSavedRun = useCallback(async (id: string, steps: CompiledStep[]) => {
+  const updateSavedRun = useCallback(async (id: string, steps: CompiledStep[], completedAtLogicalDate?: string) => {
     if (!state.activeRun?.savedRunId) return;
 
     const savedRunId = state.activeRun.savedRunId;
     const currentSteps = state.activeRun.currentSteps.map((s) => ({ ...s }));
 
     // 1. Update React state via reducer (immutable)
-    dispatch({ type: 'UPDATE_SAVED_RUN', payload: { id: savedRunId, steps: currentSteps } });
+    dispatch({ type: 'UPDATE_SAVED_RUN', payload: { id: savedRunId, steps: currentSteps, completedAtLogicalDate } });
 
     // 2. Immediate AsyncStorage commit — don't rely on useEffect cycle
     // This ensures hardware file-system persistence before navigation
@@ -970,12 +1063,14 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
       // Read raw string directly from AsyncStorage (no parsing yet)
       const rawString = await AsyncStorage.getItem(KEYS.SAVED_RUNS);
       const runs: RunInstance[] = rawString ? JSON.parse(rawString) : [];
+      const isFinished = currentSteps.every(s => s.isCompleted);
       const updated = runs.map((sr) =>
         sr.id === savedRunId
           ? {
               ...sr,
               currentSteps,
-              savedAt: Date.now(),
+              ...(completedAtLogicalDate && { completedAtLogicalDate }),
+              isFinished,
             }
           : sr
       );
@@ -1003,6 +1098,11 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
   // Delete a saved run
   const deleteSavedRun = useCallback((runId: string) => {
     dispatch({ type: 'DELETE_SAVED_RUN', payload: runId });
+  }, []);
+
+  // Clear all saved runs
+  const clearAllSavedRuns = useCallback(() => {
+    dispatch({ type: 'CLEAR_ALL_SAVED_RUNS' });
   }, []);
 
   // Clear active run (used for abandoning fresh runs)
@@ -1050,6 +1150,7 @@ export function FlightManualProvider({ children }: { children: ReactNode }) {
         updateSavedRun,
         resumeSavedRun,
         deleteSavedRun,
+        clearAllSavedRuns,
         clearActiveRun,
         isRunExpired,
         getRunExpiryHours,

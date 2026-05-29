@@ -28,6 +28,19 @@ export const APP_CONFIG = {
   } as const,
 
   /**
+   * Recurring routine configuration constants.
+   * Controls the grace window for late-night completions.
+   */
+  RECURRING_CONFIG: {
+    /**
+     * Grace window end hour (0-23).
+     * Times between 12:00 AM (0) and this hour are considered part of the previous day.
+     * @default 4 (4:00 AM)
+     */
+    GRACE_WINDOW_END_HOUR: 4,
+  } as const,
+
+  /**
    * AsyncStorage key constants for centralized key management.
    * Changing these values will break existing persisted data.
    */
@@ -110,6 +123,53 @@ export const APP_CONFIG = {
     if (remainingMs <= 0) return 0;
 
     return Math.max(0, Math.ceil(remainingMs / (60 * 60 * 1000)));
+  },
+
+  /**
+   * Gets the "logical date" for recurring routines.
+   *
+   * The logical date accounts for a grace window where late-night usage
+   * (12:00 AM to GRACE_WINDOW_END_HOUR) is considered part of the previous day.
+   * This allows users who stay up past midnight to have completions count
+   * toward the day they woke up on.
+   *
+   * @param dateInput - Optional date to calculate logical date for (defaults to now)
+   * @returns Logical date string in YYYY-MM-DD format
+   *
+   * @example
+   * // At 2:00 AM on May 29, returns "2025-05-28" (previous day)
+   * APP_CONFIG.getLogicalDate()
+   * // At 9:00 AM on May 29, returns "2025-05-29" (current day)
+   * APP_CONFIG.getLogicalDate()
+   */
+  getLogicalDate(dateInput: Date | undefined = undefined): string {
+    const date = dateInput ? new Date(dateInput) : new Date();
+    const hour = date.getHours();
+
+    // Grace window: 12AM-4AM counts as previous day
+    if (hour >= 0 && hour < this.RECURRING_CONFIG.GRACE_WINDOW_END_HOUR) {
+      date.setDate(date.getDate() - 1);
+    }
+
+    return date.toISOString().split('T')[0]; // YYYY-MM-DD format
+  },
+
+  /**
+   * Checks if a new logical day has started since the last check.
+   * Used to determine if recurring routines need to be reset.
+   *
+   * @param lastCheckedDateString - The last logical date string to compare against
+   * @returns true if a new logical day has started, false otherwise
+   *
+   * @example
+   * const lastDate = "2025-05-28";
+   * // At 2:00 AM on May 29 (logical date still "2025-05-28"), returns false
+   * // At 5:00 AM on May 29 (logical date "2025-05-29"), returns true
+   * APP_CONFIG.isNewLogicalDay(lastDate);
+   */
+  isNewLogicalDay(lastCheckedDateString: string): boolean {
+    const currentLogicalDate = this.getLogicalDate();
+    return currentLogicalDate !== lastCheckedDateString;
   },
 
 } as const;

@@ -19,6 +19,7 @@ export interface Collection {
   tags: string[];
   executionMode: ExecutionMode;
   steps: Step[];
+  isRecurring?: boolean; // Flag to enable auto-spawning daily routine behavior
 }
 
 export interface Template {
@@ -42,6 +43,8 @@ export interface RunInstance {
   customName?: string; // User-defined name for saved runs (optional for active runs)
   expiresAt?: number; // 24-hour expiry timestamp (required for saved runs)
   savedRunId?: string; // Tracks if this run was resumed from a saved run
+  logicalDate?: string; // The logical date (YYYY-MM-DD) when this run was spawned
+  completedAtLogicalDate?: string; // The logical date when 100% completion was reached
 }
 
 export interface RunLog {
